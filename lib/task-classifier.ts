@@ -44,6 +44,24 @@ function heuristicClassify(prompt: string, attachmentNames: string[]): ClassifyR
   const hasFiles = attachmentNames.length > 0;
   const promptLen = prompt.length;
 
+  // ⭐ 知识吸纳模式（用户明确要把文档"教给系统"/"整合 skill"）
+  // 这类任务必走 standard，必读 skill-creator
+  const ingestPatterns = [
+    /(?:整合|教给|喂给|添加到|加入).{0,15}(?:系统|skill|知识库|手册)/,
+    /(?:学[习一]+下|吸收|沉淀).{0,15}(?:这[个本份]|此).{0,15}(?:pdf|文档|资料|书|手册|标准)/,
+    /(?:把|将).{0,30}(?:distill|提炼|整合|做成).{0,15}(?:skill|手册|规则)/,
+    /(?:做一个|新建).{0,15}(?:skill|技能|手册).{0,30}(?:领域|方面)/,
+    /distill.{0,15}(?:pdf|doc|skill)/i,
+  ];
+  if (ingestPatterns.some(re => re.test(prompt))) {
+    return {
+      mode: 'standard',
+      reason: '知识吸纳任务：触发 skill-creator 流水线',
+      recommendedModel: MODEL_BY_MODE.standard,
+      forceCritic: false,
+    };
+  }
+
   // 问答模式（即使含技术词也判 lite）
   const qaPatterns = [
     /什么是|什么叫|是什么/,

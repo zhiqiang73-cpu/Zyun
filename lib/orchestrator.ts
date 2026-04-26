@@ -174,6 +174,17 @@ ${criticBlock}
 2. 按计划逐步执行，每完成一步就再次 TodoWrite 把状态推到下一步。
 3. 全部完成后用一句话总结结果。
 
+## 知识吸纳工作流（用户上传 PDF 让"教给系统"时）
+
+如果用户的指令包含"整合到系统 / 教给系统 / 学一下这本书 / distill PDF / 加进 skill"等意图，**走专门流程**：
+1. **先 Read \`skills/skill-creator.md\`** —— 这是元 skill，教你怎么 distill
+2. 跑 \`python scripts/distill_doc.py uploads/<file>.pdf --out parsed/\`（抽全文 + 章节结构）
+3. 按 skill-creator 的 **7 步方法论 + 知识分层规则** 执行：
+   - Step 3 是核心：判断每块内容应该落到 \`.md\` skill / \`.json\` data / \`.py\` script 哪一层（**不要全塞 .md**）
+   - 输出 **draft 到 workspace/skills/、workspace/knowledge/、workspace/scripts/**
+4. 给用户清单告知如何 promote 到项目级（cp 命令）
+5. **不要**直接写到项目 skills/（沙箱安全边界）
+
 ## 2D 铣削快速工作流（TL;DR，详细版见 skills/2d-milling-workflow.md）
 
 如果用户给了 PDF 工程图 + 要 G-code，按以下顺序（**已上传 PDF 时 \`parsed/\` 通常已自动预解析就绪**）：
