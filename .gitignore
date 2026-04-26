@@ -1,0 +1,31 @@
+node_modules/
+.next/
+out/
+build/
+dist/
+
+# runtime
+data/
+workspaces/
+
+# env / secrets （永远不能进 repo）
+.env
+.env.local
+.env.*.local
+*.key
+*key*.txt
+*secret*
+*credential*
+
+# helper LLM 配置（内含 provider 信息）
+config/helpers.json
+
+# system
+.DS_Store
+*.log
+.vscode/
+.idea/
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts

@@ -1,0 +1,112 @@
+{
+  "_doc": "材料数据库 — 加工性能、典型参数、注意事项。来源：Sandvik CoroKey、机械加工工艺手册、各厂家 catalog 经验值。所有 Vc/fz 数值在 cutting_data.json 里。",
+  "_version": "0.1.0",
+  "_units": "Vc m/min, fz mm/tooth, F mm/min, ap/ae mm",
+
+  "HT150": {
+    "name": "灰铸铁 HT150",
+    "standard": "GB/T 9439",
+    "category": "cast_iron",
+    "subcategory": "gray_cast_iron",
+    "hardness": { "HB": [120, 200], "typical_HB": 170 },
+    "tensile_MPa": 150,
+    "machinability_rating": 0.7,
+    "machinability_baseline": "1.0 = 6061-T6",
+    "typical_uses": ["箱体", "底座", "轴承座", "机床床身", "支架"],
+    "cutting_tool_recommendation": ["coated_carbide", "ceramic_for_high_speed"],
+    "preferred_coolant": "dry_or_air_blast",
+    "coolant_notes": "灰铸铁通常干切，用空气吹屑。湿切易粘屑且影响刀具寿命。",
+    "chip_type": "discontinuous_brittle",
+    "key_warnings": [
+      "脆性大，**进刀和出刀位置注意防崩边**",
+      "首件试切验证 S/F",
+      "灰铸铁石墨片对刀具有润滑作用，但磨粒磨损偏高",
+      "不要给冷却液（除非加工特别精密的孔）"
+    ]
+  },
+
+  "HT200": {
+    "name": "灰铸铁 HT200",
+    "standard": "GB/T 9439",
+    "category": "cast_iron",
+    "subcategory": "gray_cast_iron",
+    "hardness": { "HB": [150, 230], "typical_HB": 190 },
+    "tensile_MPa": 200,
+    "machinability_rating": 0.65,
+    "typical_uses": ["发动机缸体", "齿轮箱", "受力支架", "气缸"],
+    "cutting_tool_recommendation": ["coated_carbide"],
+    "preferred_coolant": "dry_or_air_blast",
+    "chip_type": "discontinuous_brittle",
+    "key_warnings": [
+      "比 HT150 硬度高一档，参数取 HT150 的 0.85-0.9 倍",
+      "进给量不宜过大，易崩刃",
+      "厚壁薄壁过渡处吃刀量控制"
+    ]
+  },
+
+  "6061-T6": {
+    "name": "铝合金 6061-T6",
+    "standard": "GB/T 3190 / ASTM B221",
+    "category": "aluminum",
+    "subcategory": "wrought_alloy",
+    "hardness": { "HB": [95, 110], "typical_HB": 100 },
+    "tensile_MPa": 310,
+    "machinability_rating": 1.0,
+    "machinability_baseline": "基准（最易加工的常见金属之一）",
+    "typical_uses": ["治具夹具", "结构件", "外壳", "散热器", "原型件"],
+    "cutting_tool_recommendation": ["uncoated_carbide", "polished_carbide", "diamond_coated"],
+    "preferred_coolant": "flood_or_mist",
+    "coolant_notes": "湿切防粘屑，**绝对避免无冷却干切**（铝会粘在刀具切削刃形成积屑瘤）",
+    "chip_type": "long_continuous_or_short",
+    "key_warnings": [
+      "高速切削首选（10000+ RPM 是常态）",
+      "刀具排屑空间要大，避免碎屑堵塞（用大螺旋角立铣）",
+      "粘屑严重时降低进给+提高速度+加大冷却",
+      "薄壁件注意夹紧力变形"
+    ]
+  },
+
+  "45": {
+    "name": "45 钢（中碳钢）",
+    "alt_names": ["45#", "C45", "1045"],
+    "standard": "GB/T 699",
+    "category": "carbon_steel",
+    "subcategory": "medium_carbon",
+    "hardness": { "HB": [170, 210], "typical_HB": 195, "annealed": 170, "normalized": 200 },
+    "tensile_MPa": 600,
+    "machinability_rating": 0.55,
+    "typical_uses": ["轴", "齿轮坯料", "螺栓", "连杆", "通用结构件"],
+    "cutting_tool_recommendation": ["coated_carbide_general_purpose"],
+    "preferred_coolant": "flood",
+    "chip_type": "continuous_curling",
+    "key_warnings": [
+      "易卷切屑，**要看准屑形或用断屑槽**，避免长条屑缠工件",
+      "正火态比退火态硬一些（HB 200 vs 170），参数有差异",
+      "切深较大时主轴功率检查",
+      "调质态（HB 230+）参数再降一档"
+    ]
+  },
+
+  "304": {
+    "name": "奥氏体不锈钢 304",
+    "alt_names": ["S30408", "06Cr19Ni10", "AISI 304"],
+    "standard": "GB/T 4237 / ASTM A240",
+    "category": "stainless_steel",
+    "subcategory": "austenitic",
+    "hardness": { "HB": [150, 200], "typical_HB": 170 },
+    "tensile_MPa": 520,
+    "machinability_rating": 0.4,
+    "typical_uses": ["食品设备", "化工容器", "外观件", "医疗"],
+    "cutting_tool_recommendation": ["coated_carbide_for_stainless", "P40_grade_or_AlTiN_coated"],
+    "preferred_coolant": "high_pressure_flood",
+    "coolant_notes": "高压冷却（10+ bar）显著延长刀具寿命；不能间歇冷却（热震会崩刃）",
+    "chip_type": "tough_continuous",
+    "key_warnings": [
+      "加工硬化严重 —— 一旦切削速度过低，工件表层快速硬化，下一刀就难切",
+      "宁可快不可慢，进给量足够，避免切削刃在工件上仅做摩擦",
+      "刀具磨损快（韧性需求高），用 TiAlN/AlCrN 涂层",
+      "积屑瘤倾向大，温度控制是关键",
+      "薄壁件刚性差，振刀严重"
+    ]
+  }
+}

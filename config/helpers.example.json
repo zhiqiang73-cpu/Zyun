@@ -1,0 +1,63 @@
+{
+  "_doc": "复制本文件为 config/helpers.json 并按你的 key 填好。每个角色背后绑一个 OpenAI 兼容 provider。key 不直接写在这里，写环境变量名。",
+
+  "reason": {
+    "base": "https://api.deepseek.com/v1",
+    "key_env": "DEEPSEEK_API_KEY",
+    "model": "deepseek-reasoner",
+    "description": "深度推理：复杂逻辑、数学、调试。DeepSeek-R1 推理能力接近 GPT-4o 但便宜很多。",
+    "defaultMaxTokens": 4096,
+    "defaultTemperature": 0.2
+  },
+
+  "verify": {
+    "base": "https://api.deepseek.com/v1",
+    "key_env": "DEEPSEEK_API_KEY",
+    "model": "deepseek-chat",
+    "description": "校验：是非判断、规则检查、G-code 语法检查。DeepSeek-V3，便宜且可靠。",
+    "defaultMaxTokens": 1024,
+    "defaultTemperature": 0.1
+  },
+
+  "summarize": {
+    "base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "key_env": "ALIYUN_DASHSCOPE_KEY",
+    "model": "moonshot-v1-128k",
+    "description": "长文摘要。Kimi 200K 上下文是看家本领，适合长 PDF / 网页 / 规范文档浓缩。",
+    "defaultMaxTokens": 2048,
+    "defaultTemperature": 0.3
+  },
+
+  "write_chinese": {
+    "base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "key_env": "ALIYUN_DASHSCOPE_KEY",
+    "model": "abab7-chat-preview",
+    "description": "中文创作：MiniMax 中文质感强，适合工艺卡说明、操作手册等中文内容生成。",
+    "defaultMaxTokens": 4096,
+    "defaultTemperature": 0.7
+  },
+
+  "suggest": {
+    "base": "https://api.deepseek.com/v1",
+    "key_env": "DEEPSEEK_API_KEY",
+    "model": "deepseek-chat",
+    "description": "任务结束生成 3 条 next-step 建议卡片（DeepSeek-V3，便宜又稳）。",
+    "defaultMaxTokens": 512,
+    "defaultTemperature": 0.5
+  },
+
+  "extract": {
+    "base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "key_env": "ALIYUN_DASHSCOPE_KEY",
+    "model": "qwen-plus",
+    "description": "结构化抽取：自由文本 → JSON。Qwen function calling 稳。",
+    "defaultMaxTokens": 2048,
+    "defaultTemperature": 0.1
+  },
+
+  "default": {
+    "base": "https://api.deepseek.com/v1",
+    "key_env": "DEEPSEEK_API_KEY",
+    "model": "deepseek-chat"
+  }
+}

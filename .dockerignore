@@ -1,0 +1,35 @@
+# 不进镜像的本地大文件 / 运行时数据 / 密钥
+node_modules
+.next
+out
+build
+dist
+
+# runtime（部署后由持久卷接管）
+data
+workspaces
+
+# env / secrets
+.env
+.env.local
+.env.*.local
+*.key
+*key*.txt
+*secret*
+*credential*
+config/helpers.json
+
+# logs / 缓存
+*.log
+*.tsbuildinfo
+
+# IDE / 系统
+.git
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# 文档（不影响运行，可以减小镜像）
+README.md
+.claude

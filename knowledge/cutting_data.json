@@ -1,0 +1,160 @@
+{
+  "_doc": "切削参数矩阵 — 材料 × 刀具类型 × 工序 → [Vc, fz, ap, ae] 范围。范围给出 [低, 中, 高]，对应保守/标准/激进策略。脚本默认取中位。",
+  "_version": "0.1.0",
+  "_units": {
+    "Vc": "m/min（切削线速度）",
+    "fz": "mm/tooth（每齿进给，多刃刀具）",
+    "fr": "mm/rev（每转进给，钻头/铰刀/丝锥）",
+    "ap_x_D": "倍数 × 刀具直径 D（轴向切深）",
+    "ae_x_D": "倍数 × 刀具直径 D（径向切宽）"
+  },
+  "_lookup_keys": {
+    "tool_type": ["carbide_endmill", "hss_endmill", "coated_carbide_endmill_for_stainless", "carbide_drill", "hss_drill", "coated_carbide_drill", "reamer_machine", "tap", "carbide_face_mill", "boring_bar"],
+    "operation": ["face_milling", "rough_milling", "finish_milling", "slot_milling", "contour_milling", "drilling", "deep_drilling", "reaming", "threading", "boring"]
+  },
+
+  "HT150": {
+    "carbide_endmill": {
+      "rough_milling":   { "Vc": [70, 90, 120], "fz": [0.08, 0.12, 0.18], "ap_x_D": [0.5, 0.75, 1.0], "ae_x_D": [0.4, 0.5, 0.6] },
+      "finish_milling":  { "Vc": [100, 130, 160], "fz": [0.05, 0.08, 0.12], "ap_x_D": [0.1, 0.2, 0.3], "ae_x_D": [0.1, 0.2, 0.3] },
+      "slot_milling":    { "Vc": [60, 80, 100], "fz": [0.06, 0.1, 0.15], "ap_x_D": [0.3, 0.4, 0.5], "ae_x_D": [1.0, 1.0, 1.0] },
+      "contour_milling": { "Vc": [80, 100, 130], "fz": [0.07, 0.1, 0.15], "ap_x_D": [0.5, 0.7, 1.0], "ae_x_D": [0.3, 0.4, 0.5] }
+    },
+    "hss_endmill": {
+      "rough_milling":   { "Vc": [20, 28, 35], "fz": [0.05, 0.08, 0.12], "ap_x_D": [0.5, 0.7, 0.8], "ae_x_D": [0.4, 0.5, 0.6] },
+      "slot_milling":    { "Vc": [18, 25, 30], "fz": [0.04, 0.06, 0.1], "ap_x_D": [0.3, 0.4, 0.5], "ae_x_D": [1.0, 1.0, 1.0] }
+    },
+    "carbide_drill": {
+      "drilling":        { "Vc": [60, 90, 120], "fr": [0.15, 0.25, 0.4] },
+      "deep_drilling":   { "Vc": [50, 70, 90], "fr": [0.1, 0.18, 0.3] }
+    },
+    "hss_drill": {
+      "drilling":        { "Vc": [12, 18, 25], "fr": [0.1, 0.2, 0.3] }
+    },
+    "reamer_machine": {
+      "reaming":         { "Vc": [10, 15, 20], "fr": [0.3, 0.5, 0.8] }
+    },
+    "tap": {
+      "threading":       { "Vc": [4, 7, 10], "fr": "= pitch" }
+    },
+    "carbide_face_mill": {
+      "face_milling":    { "Vc": [80, 110, 140], "fz": [0.1, 0.18, 0.25], "ap_x_D": [0.05, 0.1, 0.15], "ae_x_D": [0.6, 0.75, 0.9] }
+    },
+    "boring_bar": {
+      "boring":          { "Vc": [70, 90, 110], "fr": [0.1, 0.15, 0.25] }
+    }
+  },
+
+  "HT200": {
+    "_inherit_from": "HT150",
+    "_scale": 0.85,
+    "_note": "比 HT150 难切，所有参数 ×0.85（脚本会自动套用）",
+    "carbide_endmill": {
+      "rough_milling":   { "Vc": [60, 76, 100], "fz": [0.07, 0.1, 0.15], "ap_x_D": [0.4, 0.6, 0.85], "ae_x_D": [0.3, 0.45, 0.55] },
+      "finish_milling":  { "Vc": [85, 110, 135], "fz": [0.04, 0.07, 0.1], "ap_x_D": [0.1, 0.2, 0.3], "ae_x_D": [0.1, 0.15, 0.25] },
+      "slot_milling":    { "Vc": [50, 68, 85], "fz": [0.05, 0.08, 0.12], "ap_x_D": [0.25, 0.35, 0.45], "ae_x_D": [1.0, 1.0, 1.0] }
+    },
+    "carbide_drill": {
+      "drilling":        { "Vc": [50, 75, 100], "fr": [0.12, 0.2, 0.32] }
+    },
+    "tap": {
+      "threading":       { "Vc": [3.5, 6, 9], "fr": "= pitch" }
+    }
+  },
+
+  "6061-T6": {
+    "carbide_endmill": {
+      "rough_milling":   { "Vc": [200, 350, 500], "fz": [0.1, 0.15, 0.25], "ap_x_D": [0.5, 1.0, 1.5], "ae_x_D": [0.5, 0.6, 0.7] },
+      "finish_milling":  { "Vc": [300, 450, 600], "fz": [0.05, 0.08, 0.15], "ap_x_D": [0.1, 0.2, 0.3], "ae_x_D": [0.1, 0.15, 0.25] },
+      "slot_milling":    { "Vc": [150, 250, 400], "fz": [0.08, 0.12, 0.18], "ap_x_D": [0.3, 0.5, 0.7], "ae_x_D": [1.0, 1.0, 1.0] },
+      "contour_milling": { "Vc": [250, 400, 550], "fz": [0.08, 0.12, 0.2], "ap_x_D": [0.7, 1.2, 2.0], "ae_x_D": [0.3, 0.4, 0.5] }
+    },
+    "hss_endmill": {
+      "rough_milling":   { "Vc": [60, 90, 120], "fz": [0.06, 0.1, 0.15], "ap_x_D": [0.4, 0.6, 0.8], "ae_x_D": [0.4, 0.5, 0.6] },
+      "slot_milling":    { "Vc": [50, 75, 100], "fz": [0.05, 0.08, 0.12], "ap_x_D": [0.3, 0.4, 0.5], "ae_x_D": [1.0, 1.0, 1.0] }
+    },
+    "carbide_drill": {
+      "drilling":        { "Vc": [120, 200, 300], "fr": [0.1, 0.2, 0.35] },
+      "deep_drilling":   { "Vc": [100, 150, 220], "fr": [0.08, 0.15, 0.25] }
+    },
+    "hss_drill": {
+      "drilling":        { "Vc": [40, 60, 90], "fr": [0.08, 0.15, 0.25] }
+    },
+    "reamer_machine": {
+      "reaming":         { "Vc": [25, 40, 60], "fr": [0.2, 0.4, 0.7] }
+    },
+    "tap": {
+      "threading":       { "Vc": [10, 20, 30], "fr": "= pitch" }
+    },
+    "carbide_face_mill": {
+      "face_milling":    { "Vc": [300, 500, 800], "fz": [0.1, 0.2, 0.3], "ap_x_D": [0.05, 0.1, 0.15], "ae_x_D": [0.7, 0.8, 0.9] }
+    },
+    "boring_bar": {
+      "boring":          { "Vc": [200, 300, 400], "fr": [0.05, 0.1, 0.2] }
+    }
+  },
+
+  "45": {
+    "carbide_endmill": {
+      "rough_milling":   { "Vc": [120, 180, 250], "fz": [0.07, 0.1, 0.15], "ap_x_D": [0.5, 0.75, 1.0], "ae_x_D": [0.4, 0.5, 0.6] },
+      "finish_milling":  { "Vc": [180, 240, 320], "fz": [0.04, 0.07, 0.1], "ap_x_D": [0.1, 0.2, 0.3], "ae_x_D": [0.1, 0.15, 0.25] },
+      "slot_milling":    { "Vc": [100, 150, 200], "fz": [0.05, 0.08, 0.12], "ap_x_D": [0.3, 0.4, 0.5], "ae_x_D": [1.0, 1.0, 1.0] },
+      "contour_milling": { "Vc": [150, 200, 280], "fz": [0.06, 0.09, 0.13], "ap_x_D": [0.5, 0.7, 1.0], "ae_x_D": [0.3, 0.4, 0.5] }
+    },
+    "hss_endmill": {
+      "rough_milling":   { "Vc": [25, 35, 45], "fz": [0.04, 0.06, 0.1], "ap_x_D": [0.4, 0.6, 0.7], "ae_x_D": [0.4, 0.5, 0.6] },
+      "slot_milling":    { "Vc": [20, 28, 38], "fz": [0.03, 0.05, 0.08], "ap_x_D": [0.25, 0.35, 0.45], "ae_x_D": [1.0, 1.0, 1.0] }
+    },
+    "carbide_drill": {
+      "drilling":        { "Vc": [90, 130, 180], "fr": [0.1, 0.18, 0.3] },
+      "deep_drilling":   { "Vc": [70, 100, 140], "fr": [0.08, 0.13, 0.22] }
+    },
+    "hss_drill": {
+      "drilling":        { "Vc": [20, 28, 35], "fr": [0.08, 0.15, 0.25] }
+    },
+    "reamer_machine": {
+      "reaming":         { "Vc": [15, 22, 30], "fr": [0.2, 0.4, 0.7] }
+    },
+    "tap": {
+      "threading":       { "Vc": [6, 10, 15], "fr": "= pitch" }
+    },
+    "carbide_face_mill": {
+      "face_milling":    { "Vc": [180, 250, 350], "fz": [0.1, 0.18, 0.25], "ap_x_D": [0.05, 0.1, 0.15], "ae_x_D": [0.6, 0.75, 0.85] }
+    },
+    "boring_bar": {
+      "boring":          { "Vc": [120, 180, 240], "fr": [0.08, 0.15, 0.25] }
+    }
+  },
+
+  "304": {
+    "coated_carbide_endmill_for_stainless": {
+      "rough_milling":   { "Vc": [60, 90, 120], "fz": [0.06, 0.1, 0.15], "ap_x_D": [0.4, 0.5, 0.7], "ae_x_D": [0.3, 0.4, 0.5] },
+      "finish_milling":  { "Vc": [90, 120, 160], "fz": [0.04, 0.06, 0.1], "ap_x_D": [0.1, 0.15, 0.25], "ae_x_D": [0.1, 0.15, 0.2] },
+      "slot_milling":    { "Vc": [50, 75, 100], "fz": [0.05, 0.08, 0.12], "ap_x_D": [0.25, 0.35, 0.45], "ae_x_D": [1.0, 1.0, 1.0] },
+      "contour_milling": { "Vc": [70, 100, 140], "fz": [0.06, 0.09, 0.13], "ap_x_D": [0.4, 0.5, 0.7], "ae_x_D": [0.3, 0.4, 0.5] }
+    },
+    "carbide_endmill": {
+      "_note": "304 强烈推荐 coated_carbide_endmill_for_stainless，普通 carbide 也能用但寿命短",
+      "rough_milling":   { "Vc": [40, 60, 80], "fz": [0.04, 0.07, 0.1], "ap_x_D": [0.3, 0.4, 0.5], "ae_x_D": [0.25, 0.35, 0.45] }
+    },
+    "carbide_drill": {
+      "drilling":        { "Vc": [40, 60, 90], "fr": [0.08, 0.15, 0.25] },
+      "deep_drilling":   { "Vc": [30, 45, 65], "fr": [0.06, 0.1, 0.18] }
+    },
+    "hss_drill": {
+      "drilling":        { "Vc": [10, 14, 20], "fr": [0.06, 0.12, 0.2] }
+    },
+    "reamer_machine": {
+      "reaming":         { "Vc": [8, 12, 18], "fr": [0.15, 0.3, 0.5] }
+    },
+    "tap": {
+      "threading":       { "Vc": [3, 5, 8], "fr": "= pitch" }
+    },
+    "carbide_face_mill": {
+      "face_milling":    { "Vc": [100, 150, 220], "fz": [0.08, 0.15, 0.22], "ap_x_D": [0.05, 0.08, 0.12], "ae_x_D": [0.5, 0.65, 0.8] }
+    },
+    "boring_bar": {
+      "boring":          { "Vc": [60, 90, 130], "fr": [0.05, 0.1, 0.18] }
+    }
+  }
+}
