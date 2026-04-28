@@ -4,8 +4,7 @@
  * 设计：
  *   - 每个 standard/heavy 任务结束（含 error 失败）后异步跑一次反思
  *   - 4 问 prompt（盲区 / 命中 skill / 可复用 pattern / 改进建议）
- *   - 输出：data/reflections/<sid>.md
- *   - 同步更新：data/learning_backlog.json（pending 列表，等批量蒸馏）
+ *   - 输出：SQLite reflections 表 + learning_backlog 表
  *   - lite 任务跳过（成本/价值不匹配）
  *
  * 后续 Step 4 会做：累积 N 条或一周到了 → 批量蒸馏成 skill draft。
@@ -14,50 +13,9 @@
  * 模型：helper('verify')，DeepSeek-V3 便宜模型够用。每次 ~¥0.005。
  */
 
-import path from 'node:path';
-import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
-import { listAllEvents } from './db';
+import { listAllEvents, upsertReflection, upsertBacklogItem, getBacklogItem, listBacklogByStatus } from './db';
 import { helper } from './helper-llm';
 import type { TaskMode } from './task-classifier';
-
-const DATA_DIR = process.env.MANUSCOPY_DATA_DIR ?? path.join(process.cwd(), 'data');
-const REFLECTIONS_DIR = path.join(DATA_DIR, 'reflections');
-const BACKLOG_PATH = path.join(DATA_DIR, 'learning_backlog.json');
-
-type Backlog = {
-  pending: string[];     // 已写但未蒸馏
-  distilled: string[];   // 已被纳入 skill 的
-  rejected: string[];    // 用户审核 reject 过的（去重用）
-  last_updated: string;
-};
-
-function ensureDir(): void {
-  if (!existsSync(REFLECTIONS_DIR)) mkdirSync(REFLECTIONS_DIR, { recursive: true });
-}
-
-function readBacklog(): Backlog {
-  try {
-    if (existsSync(BACKLOG_PATH)) {
-      const obj = JSON.parse(readFileSync(BACKLOG_PATH, 'utf-8'));
-      return {
-        pending: Array.isArray(obj.pending) ? obj.pending : [],
-        distilled: Array.isArray(obj.distilled) ? obj.distilled : [],
-        rejected: Array.isArray(obj.rejected) ? obj.rejected : [],
-        last_updated:
-          typeof obj.last_updated === 'string' ? obj.last_updated : new Date().toISOString(),
-      };
-    }
-  } catch {}
-  return { pending: [], distilled: [], rejected: [], last_updated: new Date().toISOString() };
-}
-
-function writeBacklog(b: Backlog): void {
-  try {
-    writeFileSync(BACKLOG_PATH, JSON.stringify(b, null, 2), 'utf-8');
-  } catch (err) {
-    console.warn('[reflection-writer] failed to write backlog:', err);
-  }
-}
 
 type EventSummary = {
   userPrompt: string;
@@ -94,11 +52,12 @@ function summarizeEvents(sid: string): EventSummary {
   for (const e of events) {
     if (e.timestamp > tEnd) tEnd = e.timestamp;
     if (e.type === 'planUpdate') {
-      const tasks = (e.payload as any)?.tasks;
+      const tasks = (e.payload as Record<string, unknown>)?.tasks;
       if (Array.isArray(tasks)) {
         planSteps.length = 0;
         for (const t of tasks) {
-          if (t?.title) planSteps.push(String(t.title));
+          if ((t as Record<string, unknown>)?.title)
+            planSteps.push(String((t as Record<string, unknown>).title));
         }
       }
     }
@@ -109,7 +68,7 @@ function summarizeEvents(sid: string): EventSummary {
       toolBriefs.push(`${tool}/${action}${briefStr}`.slice(0, 120));
     }
     if (e.type === 'statusUpdate') {
-      const s = (e.payload as any)?.agentStatus;
+      const s = (e.payload as Record<string, unknown>)?.agentStatus;
       if (typeof s === 'string') finalStatus = s;
     }
     if (e.type === 'chat' && e.sender === 'assistant' && e.content) {
@@ -174,30 +133,6 @@ Q3：解法里有没有可复用的 pattern（适用于未来同类任务）？
 Q4：下次类似任务怎么走更快、更准？给一条具体建议。`;
 }
 
-function renderReflectionMd(args: {
-  sid: string;
-  ts: string;
-  taskMode: TaskMode;
-  taskTitle: string;
-  summary: EventSummary;
-  body: string;
-}): string {
-  const { sid, ts, taskMode, taskTitle, summary, body } = args;
-  const safeTitle = taskTitle.replace(/[\r\n"]/g, ' ').slice(0, 100);
-  return `---
-sid: ${sid}
-ts: ${ts}
-mode: ${taskMode}
-title: "${safeTitle}"
-duration_s: ${summary.durationS}
-tool_count: ${summary.toolCount}
-final_status: ${summary.finalStatus}
----
-
-${body}
-`;
-}
-
 /**
  * 任务后反思——异步、fire-and-forget、错误吞掉。
  * lite 任务直接跳过。
@@ -208,7 +143,6 @@ export async function runReflection(
   taskTitle: string,
 ): Promise<void> {
   if (taskMode === 'lite') return;
-  ensureDir();
 
   let summary: EventSummary;
   try {
@@ -231,30 +165,37 @@ export async function runReflection(
   if (!reflection || !reflection.trim()) return;
 
   const ts = new Date().toISOString();
-  const md = renderReflectionMd({
-    sid,
-    ts,
-    taskMode,
-    taskTitle,
-    summary,
-    body: reflection.trim(),
-  });
+  const safeTitle = taskTitle.replace(/[\r\n"]/g, ' ').slice(0, 100);
 
   try {
-    writeFileSync(path.join(REFLECTIONS_DIR, `${sid}.md`), md, 'utf-8');
+    upsertReflection({
+      sid,
+      ts,
+      mode: taskMode,
+      title: safeTitle,
+      duration_s: summary.durationS,
+      tool_count: summary.toolCount,
+      final_status: summary.finalStatus,
+      body: reflection.trim(),
+    });
   } catch (err) {
-    console.warn('[reflection-writer] write failed:', err);
+    console.warn('[reflection-writer] db write failed:', err);
     return;
   }
 
-  const backlog = readBacklog();
-  if (!backlog.pending.includes(sid) && !backlog.distilled.includes(sid)) {
-    backlog.pending.push(sid);
-    backlog.last_updated = ts;
-    writeBacklog(backlog);
+  // Add to backlog if not already tracked
+  const existing = getBacklogItem(sid);
+  if (!existing || existing.status === 'pending') {
+    try {
+      upsertBacklogItem(sid, 'pending');
+    } catch (err) {
+      console.warn('[reflection-writer] backlog update failed:', err);
+    }
   }
 
+  const pendingCount = listBacklogByStatus('pending').length;
+
   console.log(
-    `[manuscopy] reflection saved: ${sid} (backlog pending=${backlog.pending.length})`,
+    `[manuscopy] reflection saved: ${sid} (backlog pending=${pendingCount})`,
   );
 }

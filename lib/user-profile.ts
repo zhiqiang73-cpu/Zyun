@@ -1,24 +1,23 @@
 /**
  * 用户长记忆 (User Profile) — 跨 session 持久化的用户画像。
  *
- * 数据：data/user_profile.json （文件不进 git）
- *   - 偏好（切削风格 / 刀具品牌 / 沟通语言 / 详细度）
- *   - 机床（型号 / 轴数 / 主轴 / 转速）
- *   - 常用材料 / 工艺约束 / 用户术语
- *   - facts 列表（带 confidence / source_sid）
+ * 存储优先级：
+ *   1. SQLite user_profile 表（key = 'main'）
+ *   2. data/user_profile.json（向后兼容；首次读到自动迁入 SQLite）
  *
  * 注入：standard/heavy 任务的 system prompt 里嵌一段 < 2KB 的 profile 块。
  *       lite 任务不注入（保持轻量响应）。
  *
- * 写入：v0.1 用户手动编辑 user_profile.json。
+ * 写入：v0.1 用户手动编辑 user_profile.json（首次读取时自动迁入 SQLite）。
  *       v0.2 由 memory_writer subagent 自动维护（confidence > 0.85 自动 merge，
- *            其余进 pending_facts.json 等用户审核）。
+ *            其余进 user_facts 表等用户审核）。
  */
 
 import path from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
+import { getStoredProfile, storeProfile } from './db';
 
-const PROFILE_PATH =
+const JSON_PROFILE_PATH =
   process.env.MANUSCOPY_PROFILE_PATH ??
   path.join(
     process.env.MANUSCOPY_DATA_DIR ?? path.join(process.cwd(), 'data'),
@@ -62,14 +61,37 @@ export type UserProfile = {
   facts?: UserFact[];
 };
 
-/** 读取用户档案。文件不存在/解析失败时返回 null。 */
+/**
+ * 读取用户档案。
+ * 优先从 SQLite 读；若 SQLite 无记录则尝试读 JSON 文件并迁移入库。
+ * 文件不存在 / 解析失败时返回 null。
+ */
 export function readProfile(): UserProfile | null {
-  if (!existsSync(PROFILE_PATH)) return null;
+  // 1. Try SQLite first
   try {
-    const raw = readFileSync(PROFILE_PATH, 'utf-8');
+    const stored = getStoredProfile();
+    if (stored) return stored as unknown as UserProfile;
+  } catch (err) {
+    console.warn('[user-profile] SQLite read failed, falling back to JSON:', err);
+  }
+
+  // 2. Fall back to JSON file (and migrate into SQLite)
+  if (!existsSync(JSON_PROFILE_PATH)) return null;
+  try {
+    const raw = readFileSync(JSON_PROFILE_PATH, 'utf-8');
     const obj = JSON.parse(raw);
     if (typeof obj !== 'object' || obj === null) return null;
-    return obj as UserProfile;
+    const profile = obj as UserProfile;
+
+    // Auto-migrate into SQLite
+    try {
+      storeProfile(obj as Record<string, unknown>);
+      console.log('[user-profile] Migrated user_profile.json → SQLite');
+    } catch (err) {
+      console.warn('[user-profile] SQLite migration failed (profile still usable):', err);
+    }
+
+    return profile;
   } catch (err) {
     console.warn('[user-profile] failed to read profile:', err);
     return null;
@@ -171,7 +193,7 @@ export function renderProfileBlock(
   return block;
 }
 
-/** 暴露 profile 路径，便于 UI / 调试工具引用。 */
+/** 暴露 profile JSON 路径，便于 UI / 调试工具引用（兼容旧代码）。 */
 export function getProfilePath(): string {
-  return PROFILE_PATH;
+  return JSON_PROFILE_PATH;
 }
