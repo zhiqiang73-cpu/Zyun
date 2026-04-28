@@ -11,21 +11,58 @@
 
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import path from 'node:path';
-import { mkdirSync, existsSync, readdirSync, copyFileSync, readFileSync } from 'node:fs';
+import { mkdirSync, existsSync, readdirSync, copyFileSync, readFileSync, statSync, unlinkSync } from 'node:fs';
 import { nanoid } from 'nanoid';
 import { appendEvent, updateSession } from './db';
 import { classifyTask, type TaskMode } from './task-classifier';
+import { helper } from './helper-llm';
+import { readProfile, renderProfileBlock } from './user-profile';
+import { runReflection } from './reflection-writer';
 import type { AgentEvent, EventType, ToolName, PlanTask } from './types';
 
 const WORKSPACES_DIR =
   process.env.MANUSCOPY_WORKSPACES_DIR ?? path.join(process.cwd(), 'workspaces');
-const MODEL = process.env.MANUSCOPY_MODEL ?? 'claude-sonnet-4-5';
+const MODEL =
+  process.env.MANUSCOPY_MODEL ??
+  process.env.MANUSCOPY_CLAUDE_CODE_MODEL ??
+  'claude-sonnet-4-5';
+const CLAUDE_CODE_BASE_URL =
+  process.env.MANUSCOPY_CLAUDE_CODE_BASE_URL ??
+  process.env.ANTHROPIC_BASE_URL;
+const CLAUDE_CODE_API_KEY =
+  process.env.MANUSCOPY_CLAUDE_CODE_API_KEY ??
+  process.env.ANTHROPIC_API_KEY ??
+  process.env.ALIYUN_CODING_API_KEY;
 
 const PROJECT_ROOT = process.cwd();
 const SKILLS_SRC = path.join(PROJECT_ROOT, 'skills');
 const SCRIPTS_SRC = path.join(PROJECT_ROOT, 'scripts');
 
 if (!existsSync(WORKSPACES_DIR)) mkdirSync(WORKSPACES_DIR, { recursive: true });
+
+function configureClaudeCodeSdkEnv(): { baseUrl?: string; keySource?: string } {
+  const out: { baseUrl?: string; keySource?: string } = {};
+
+  if (CLAUDE_CODE_BASE_URL) {
+    process.env.ANTHROPIC_BASE_URL = CLAUDE_CODE_BASE_URL;
+    out.baseUrl = CLAUDE_CODE_BASE_URL;
+  }
+
+  if (process.env.MANUSCOPY_CLAUDE_CODE_API_KEY) {
+    process.env.ANTHROPIC_API_KEY = process.env.MANUSCOPY_CLAUDE_CODE_API_KEY;
+    out.keySource = 'MANUSCOPY_CLAUDE_CODE_API_KEY';
+  } else if (!process.env.ANTHROPIC_API_KEY && process.env.ALIYUN_CODING_API_KEY) {
+    process.env.ANTHROPIC_API_KEY = process.env.ALIYUN_CODING_API_KEY;
+    out.keySource = 'ALIYUN_CODING_API_KEY';
+  } else if (process.env.ANTHROPIC_API_KEY) {
+    out.keySource = 'ANTHROPIC_API_KEY';
+  } else if (CLAUDE_CODE_API_KEY) {
+    process.env.ANTHROPIC_API_KEY = CLAUDE_CODE_API_KEY;
+    out.keySource = 'configured';
+  }
+
+  return out;
+}
 
 /** 把 skills/ scripts/ knowledge/ 拷到任务工作区，让 agent 可以 Read/Bash 调用。 */
 function provisionWorkspace(workspaceDir: string): { skillsList: string; scriptsList: string } {
@@ -48,6 +85,16 @@ function provisionWorkspace(workspaceDir: string): { skillsList: string; scripts
   const KNOWLEDGE_SRC = path.join(PROJECT_ROOT, 'knowledge');
   copyDir(KNOWLEDGE_SRC, path.join(workspaceDir, 'knowledge'), ['.json']);
 
+  // 关键修复：config/helpers.json 也要拷，否则 vision_call.py / critic.py 找不到
+  // helper LLM 路由配置（base_url / model 名等；不含 API key——key 走 os.environ）。
+  // 没拷会让 vision 脚本退化到 "role vision not configured"，agent 被迫自己 Read PNG。
+  const helpersSrc = path.join(PROJECT_ROOT, 'config', 'helpers.json');
+  if (existsSync(helpersSrc)) {
+    const helpersDstDir = path.join(workspaceDir, 'config');
+    if (!existsSync(helpersDstDir)) mkdirSync(helpersDstDir, { recursive: true });
+    copyFileSync(helpersSrc, path.join(helpersDstDir, 'helpers.json'));
+  }
+
   return {
     skillsList: skillFiles.map(f => `  - skills/${f}`).join('\n'),
     scriptsList: scriptFiles.map(f => `  - scripts/${f}`).join('\n'),
@@ -63,6 +110,67 @@ function listUploads(workspaceDir: string): string {
   return files.map(f => `  - uploads/${f}`).join('\n');
 }
 
+function listRecentUserFiles(workspaceDir: string, limit = 8): string[] {
+  const hiddenTop = new Set(['skills', 'scripts', 'knowledge', 'parsed', 'config', '.claude']);
+  const out: Array<{ path: string; mtime: number }> = [];
+  const walk = (rel: string) => {
+    const abs = path.join(workspaceDir, rel);
+    let names: string[] = [];
+    try {
+      names = readdirSync(abs).filter(n => !n.startsWith('.'));
+    } catch {
+      return;
+    }
+    for (const name of names) {
+      if (!rel && hiddenTop.has(name)) continue;
+      const childRel = rel ? path.posix.join(rel, name) : name;
+      const childAbs = path.join(abs, name);
+      let st: ReturnType<typeof statSync>;
+      try {
+        st = statSync(childAbs);
+      } catch {
+        continue;
+      }
+      if (st.isDirectory()) {
+        walk(childRel);
+      } else if (st.isFile()) {
+        out.push({ path: childRel.replace(/\\/g, '/'), mtime: st.mtimeMs });
+      }
+    }
+  };
+  walk('');
+  return out
+    .sort((a, b) => b.mtime - a.mtime)
+    .slice(0, limit)
+    .map(x => x.path);
+}
+
+function stopMarkerPath(workspaceDir: string): string {
+  return path.join(workspaceDir, '.manuscopy_stop');
+}
+
+function isStopRequested(workspaceDir: string): boolean {
+  return existsSync(stopMarkerPath(workspaceDir));
+}
+
+function clearStopMarker(workspaceDir: string): void {
+  const marker = stopMarkerPath(workspaceDir);
+  try {
+    if (existsSync(marker)) unlinkSync(marker);
+  } catch {}
+}
+
+function emitStopped(sessionId: string): void {
+  emit(sessionId, { type: 'liveStatus', payload: { state: 'stopped' } });
+  emit(sessionId, {
+    type: 'statusUpdate',
+    payload: { agentStatus: 'stopped' },
+    brief: '已停止',
+  });
+  emit(sessionId, { type: 'queueStatusChange', payload: { queueStatus: 'stopped' } });
+  updateSession(sessionId, { status: 'stopped' });
+}
+
 /**
  * 系统提示词构造器 — 按工作区当前状态动态拼装。
  * 内容包括：通用 agent 行为 + 已加载 skills 列表 + 已上传文件列表。
@@ -73,6 +181,7 @@ function buildSystemPrompt(
   uploadsList: string,
   taskMode: TaskMode = 'standard',
   forceCritic: boolean = false,
+  profileBlock: string = '',
 ): string {
   const uploadsSection = uploadsList
     ? `\n## 用户上传的文件（任务输入）\n\n${uploadsList}\n\n这些是用户提供的原始输入材料，**不要修改**它们。\n`
@@ -154,7 +263,7 @@ Critic 用 DeepSeek-R1 独立推理，不是你的复述。\n`
   // LITE 模式：只发简短的"知识问答助手"prompt，不包含工艺流程/工具/skills 列表
   if (taskMode === 'lite') {
     return `你是 Manuscopy，一个机械/制造业领域的 AI 助手。当前是**轻量问答模式**。
-${modeBlock}
+${modeBlock}${profileBlock}
 
 ## 安全
 
@@ -166,7 +275,7 @@ ${modeBlock}
   // STANDARD / HEAVY 模式：完整流程
   return `你是 Manuscopy，一个专业的 AI 助手，**当前主要服务于机械/制造业自动化场景**（CAD 图纸 → CNC G-code / PLC 代码）。请用中文与用户交流。
 ${modeBlock}
-${parallelBlock}
+${profileBlock}${parallelBlock}
 ${criticBlock}
 ## 通用工作流程（务必遵守）
 
@@ -249,6 +358,10 @@ const ALLOWED_TOOLS = [
   'WebFetch',
   'TodoWrite',
 ];
+const LITE_ALLOWED_TOOLS =
+  process.env.MANUSCOPY_LITE_ALLOW_WEB === '1'
+    ? ['WebSearch', 'WebFetch']
+    : [];
 
 /** Claude Code SDK 内部工具，不在 UI 上展示给用户。 */
 const INTERNAL_TOOLS = new Set([
@@ -353,11 +466,61 @@ function truncate(s: string, n: number): string {
   return s.length <= n ? s : s.slice(0, n) + '…';
 }
 
+export type RunAgentOptions = {
+  context?: 'initial' | 'followup';
+};
+
+function buildLiteDirectPrompt(prompt: string, profileBlock: string): { system: string; user: string } {
+  const system = `你是 Manuscopy 的轻量问答助手。请用中文直接回答用户问题。
+
+规则：
+- 这是轻量问答，不要声称自己读取了文件或执行了命令。
+- 不要规划步骤，不要输出工具调用描述。
+- 简洁专业，通常 3-8 句话；必要时可以用短列表。
+- 如果用户要求生成文件、处理附件、运行命令或修改项目，请说明该请求需要进入标准 Agent 模式。
+${profileBlock ? `\n用户偏好：\n${profileBlock}` : ''}`;
+
+  return { system, user: prompt };
+}
+
+async function tryRunLiteDirect(
+  sessionId: string,
+  prompt: string,
+  profileBlock: string,
+): Promise<boolean> {
+  const { system, user } = buildLiteDirectPrompt(prompt, profileBlock);
+  const answer =
+    await helper('write_chinese', user, { system, maxTokens: 1200, temperature: 0.3 }) ??
+    await helper('default', user, { system, maxTokens: 1200, temperature: 0.3 });
+
+  if (!answer?.trim()) return false;
+
+  emit(sessionId, {
+    type: 'chat',
+    sender: 'assistant',
+    content: answer.trim(),
+  });
+  emit(sessionId, { type: 'liveStatus', payload: { state: 'done' } });
+  emit(sessionId, {
+    type: 'statusUpdate',
+    payload: { agentStatus: 'done' },
+    brief: '任务完成',
+  });
+  emit(sessionId, { type: 'queueStatusChange', payload: { queueStatus: 'done' } });
+  updateSession(sessionId, { status: 'done' });
+  return true;
+}
+
 // ---- 主入口 -------------------------------------------------------
 
-export async function runAgent(sessionId: string, prompt: string): Promise<void> {
+export async function runAgent(
+  sessionId: string,
+  prompt: string,
+  options: RunAgentOptions = {},
+): Promise<void> {
   const workspaceDir = path.join(WORKSPACES_DIR, sessionId);
   if (!existsSync(workspaceDir)) mkdirSync(workspaceDir, { recursive: true });
+  clearStopMarker(workspaceDir);
 
   // 装备 workspace（拷 skills + scripts，列出 uploads）
   const { skillsList, scriptsList } = provisionWorkspace(workspaceDir);
@@ -379,7 +542,7 @@ export async function runAgent(sessionId: string, prompt: string): Promise<void>
   let forceCritic = false;
   let modeReason = '';
   try {
-    const classify = await classifyTask(prompt, uploadFileNames);
+    const classify = await classifyTask(prompt, uploadFileNames, options.context ?? 'initial');
     taskMode = classify.mode;
     modelToUse = classify.recommendedModel || MODEL;
     forceCritic = classify.forceCritic;
@@ -392,8 +555,21 @@ export async function runAgent(sessionId: string, prompt: string): Promise<void>
     type: 'taskModeChanged',
     payload: { taskMode, model: modelToUse, forceCritic, reason: modeReason },
   });
+  // 同步到 sessions.json，否则 listSessions / getSession 永远是 POST 时的初始 'lite'
+  updateSession(sessionId, { taskMode });
 
-  const SYSTEM_PROMPT = buildSystemPrompt(skillsList, scriptsList, uploadsList, taskMode, forceCritic);
+  // 长记忆：读用户档案，按 taskMode 渲染注入块（lite 自动返回空）
+  const profile = readProfile();
+  const profileBlock = renderProfileBlock(profile, taskMode);
+
+  const SYSTEM_PROMPT = buildSystemPrompt(
+    skillsList,
+    scriptsList,
+    uploadsList,
+    taskMode,
+    forceCritic,
+    profileBlock,
+  );
   emit(sessionId, {
     type: 'statusUpdate',
     payload: { agentStatus: 'running' },
@@ -402,12 +578,40 @@ export async function runAgent(sessionId: string, prompt: string): Promise<void>
   });
   emit(sessionId, { type: 'liveStatus', payload: { state: 'thinking' } });
 
+  if (taskMode === 'lite' && uploadFileNames.length === 0) {
+    try {
+      const directDone = await tryRunLiteDirect(sessionId, prompt, profileBlock);
+      if (directDone) return;
+      emit(sessionId, {
+        type: 'liveStatus',
+        payload: { state: 'helper_fallback', reason: 'lite helper unavailable' },
+      });
+    } catch (err) {
+      emit(sessionId, {
+        type: 'liveStatus',
+        payload: { state: 'helper_fallback', error: String(err) },
+      });
+    }
+  }
+
   // 记录 tool_use_id → 已发出的事件，便于 tool_result 回写
   const toolEventByUseId = new Map<string, AgentEvent>();
   let currentPlanStepId: string | undefined;
 
   try {
     updateSession(sessionId, { status: 'running' });
+    // Lite 快路径：默认完全禁用工具，避免“靠 prompt 禁止但仍触发 tool_use”的漂移。
+    // 如需轻量联网问答，可设 MANUSCOPY_LITE_ALLOW_WEB=1 打开 WebSearch/WebFetch。
+    const allowedToolsForRun = taskMode === 'lite' ? LITE_ALLOWED_TOOLS : ALLOWED_TOOLS;
+    const sdkProvider = configureClaudeCodeSdkEnv();
+    emit(sessionId, {
+      type: 'liveStatus',
+      payload: {
+        state: 'sdk_provider_ready',
+        baseUrl: sdkProvider.baseUrl ? sdkProvider.baseUrl.replace(/\/+$/, '') : 'anthropic-default',
+        keySource: sdkProvider.keySource ?? 'missing',
+      },
+    });
 
     const messages = query({
       prompt,
@@ -415,7 +619,7 @@ export async function runAgent(sessionId: string, prompt: string): Promise<void>
         cwd: workspaceDir,
         model: modelToUse,
         systemPrompt: { type: 'preset', preset: 'claude_code', append: SYSTEM_PROMPT },
-        allowedTools: ALLOWED_TOOLS,
+        allowedTools: allowedToolsForRun,
         permissionMode: 'bypassPermissions',
         includePartialMessages: true,
       } as any,
@@ -424,6 +628,10 @@ export async function runAgent(sessionId: string, prompt: string): Promise<void>
     let resultSeen = false;
 
     for await (const msg of messages as AsyncIterable<any>) {
+      if (isStopRequested(workspaceDir)) {
+        emitStopped(sessionId);
+        return;
+      }
       try {
         await handleSdkMessage(
           sessionId,
@@ -447,11 +655,23 @@ export async function runAgent(sessionId: string, prompt: string): Promise<void>
       }
     }
 
+    if (isStopRequested(workspaceDir)) {
+      emitStopped(sessionId);
+      return;
+    }
+
     emit(sessionId, {
       type: 'statusUpdate',
       payload: { agentStatus: 'done' },
       brief: '任务完成',
     });
+    const promotedFiles = listRecentUserFiles(workspaceDir, 8);
+    if (promotedFiles.length) {
+      emit(sessionId, {
+        type: 'fileOperationPromotion',
+        payload: { files: promotedFiles },
+      });
+    }
     emit(sessionId, { type: 'queueStatusChange', payload: { queueStatus: 'done' } });
     updateSession(sessionId, { status: 'done' });
   } catch (err: any) {
@@ -459,7 +679,7 @@ export async function runAgent(sessionId: string, prompt: string): Promise<void>
     emit(sessionId, {
       type: 'chat',
       sender: 'assistant',
-      content: `[执行错误] ${msg}\n\n请检查 .env 配置：ANTHROPIC_API_KEY 是否正确？是否需要设置 ANTHROPIC_BASE_URL（用代理时）？`,
+      content: `[执行错误] ${msg}\n\n请检查 .env 配置：ANTHROPIC_API_KEY / ANTHROPIC_BASE_URL，或 MANUSCOPY_CLAUDE_CODE_API_KEY / MANUSCOPY_CLAUDE_CODE_BASE_URL 是否正确。`,
     });
     emit(sessionId, {
       type: 'statusUpdate',
@@ -468,6 +688,14 @@ export async function runAgent(sessionId: string, prompt: string): Promise<void>
       description: msg,
     });
     updateSession(sessionId, { status: 'error' });
+  }
+
+  // 自学习闭环：异步反思（fire-and-forget）。lite 任务自动跳过。
+  // 失败的任务也反思——"什么导致它失败"也是有价值的训练原料。
+  if (!isStopRequested(workspaceDir)) {
+    void runReflection(sessionId, taskMode, deriveTitle(prompt)).catch(err => {
+      console.warn('[manuscopy] reflection error:', err);
+    });
   }
 }
 

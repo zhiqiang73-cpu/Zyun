@@ -5,8 +5,10 @@ build/
 dist/
 
 # runtime
-data/
+data/*
 workspaces/
+# 例外：example 模板进 git，方便用户参考
+!data/user_profile.example.json
 
 # env / secrets （永远不能进 repo）
 .env
@@ -25,6 +27,7 @@ config/helpers.json
 *.log
 .vscode/
 .idea/
+.claude/
 
 # typescript
 *.tsbuildinfo

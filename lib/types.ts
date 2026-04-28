@@ -11,7 +11,7 @@ export type Session = {
   id: string;
   title: string;
   status: SessionStatus;
-  taskMode: 'standard' | 'lite';
+  taskMode: 'lite' | 'standard' | 'heavy';
   costedCredits: number;
   createdAt: number;
   updatedAt: number;

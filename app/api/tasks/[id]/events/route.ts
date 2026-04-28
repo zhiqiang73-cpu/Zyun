@@ -13,7 +13,8 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
   const afterRaw = url.searchParams.get('after');
   const after = afterRaw ? Number(afterRaw) : 0;
   const events = listEventsAfter(params.id, after, 500);
-  const nextAfter = events.length ? events[events.length - 1].timestamp : after;
+  const lastSeq = events.length ? (events[events.length - 1].payload as any)?.seq : undefined;
+  const nextAfter = typeof lastSeq === 'number' ? lastSeq : after;
 
   const body: EventsResponse = {
     events,

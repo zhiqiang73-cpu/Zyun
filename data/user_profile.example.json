@@ -1,0 +1,39 @@
+{
+  "_doc": "Manuscopy 用户长记忆档案。复制为 user_profile.json 后启用。Step 2 上线后会由 memory_writer 自动维护，目前手动编辑。",
+  "version": 1,
+  "updated_at": "2026-04-26T00:00:00Z",
+  "preferences": {
+    "cutting_style": "conservative",
+    "preferred_tool_brands": ["三菱", "肯纳"],
+    "language": "zh-CN",
+    "verbosity": "medium"
+  },
+  "machines": [
+    {
+      "type": "FANUC",
+      "model": "Oi-MF",
+      "axes": "XYZ",
+      "max_rpm": 8000,
+      "spindle_kw": 7.5
+    }
+  ],
+  "common_materials": ["HT200", "6061-T6", "45钢"],
+  "constraints": [
+    "只有 3 轴铣床（无第四轴）",
+    "实测精度极限到 H7"
+  ],
+  "vocabulary": {
+    "粗加工": "开荒",
+    "精加工": "光面"
+  },
+  "facts": [
+    {
+      "id": "f001",
+      "text": "用户偏好分多刀小切深策略，不接受单刀 ap=5mm 这种粗暴走刀",
+      "source_sid": "example",
+      "ts": "2026-04-26T00:00:00Z",
+      "confidence": 0.9,
+      "category": "preference"
+    }
+  ]
+}

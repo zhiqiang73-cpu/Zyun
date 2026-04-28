@@ -141,7 +141,7 @@ export async function POST(req: Request) {
   });
 
   // 文件已经在 workspace/<id>/uploads/，runAgent 启动时 system prompt 会列出来
-  void runAgent(id, prompt).catch((err) => {
+  void runAgent(id, prompt, { context: 'initial' }).catch((err) => {
     console.error('[manuscopy] agent run failed', id, err);
   });
 

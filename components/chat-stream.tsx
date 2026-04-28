@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Loader2, User, Bot, Send } from 'lucide-react';
+import { Loader2, User, Bot, Send, Square } from 'lucide-react';
 import PlanView from './plan-view';
 import ToolCard from './tool-card';
 import { cn } from '@/lib/utils';
@@ -17,6 +17,7 @@ export default function ChatStream({ sessionId, session, onEvents }: Props) {
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [followUp, setFollowUp] = useState('');
   const [sending, setSending] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const lastTsRef = useRef(0);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -74,6 +75,20 @@ export default function ChatStream({ sessionId, session, onEvents }: Props) {
     }
   }
 
+  async function stopTask() {
+    if (stopping || !isRunning) return;
+    setStopping(true);
+    try {
+      const r = await fetch(`/api/tasks/${sessionId}/stop`, { method: 'POST' });
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}));
+        alert('停止失败：' + (j.error ?? r.status));
+      }
+    } finally {
+      setStopping(false);
+    }
+  }
+
   // Auto-scroll to bottom on new events
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -95,6 +110,18 @@ export default function ChatStream({ sessionId, session, onEvents }: Props) {
         <span className="text-xs text-text-muted">
           {isRunning ? '思考中…' : session?.status === 'done' ? '已完成' : session?.status === 'error' ? '出错' : ''}
         </span>
+        <div className="flex-1" />
+        {isRunning && (
+          <button
+            onClick={stopTask}
+            disabled={stopping}
+            className="btn-ghost text-accent-red"
+            title="停止当前任务"
+          >
+            {stopping ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Square className="w-3.5 h-3.5" />}
+            {stopping ? '停止中…' : '停止'}
+          </button>
+        )}
       </header>
 
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
@@ -126,14 +153,13 @@ export default function ChatStream({ sessionId, session, onEvents }: Props) {
                 void submitFollowUp();
               }
             }}
-            placeholder={isRunning ? '任务进行中…完成后可继续对话' : '继续对话或追加指令…  (Cmd/Ctrl+Enter 发送)'}
-            disabled={isRunning}
+            placeholder={isRunning ? '任务进行中，可追加约束或纠偏…  (Cmd/Ctrl+Enter 发送)' : '继续对话或追加指令…  (Cmd/Ctrl+Enter 发送)'}
             rows={2}
-            className="flex-1 bg-transparent border-none focus:outline-none resize-none text-sm disabled:opacity-50"
+            className="flex-1 bg-transparent border-none focus:outline-none resize-none text-sm"
           />
           <button
             onClick={submitFollowUp}
-            disabled={!followUp.trim() || sending || isRunning}
+            disabled={!followUp.trim() || sending}
             className="btn-primary"
             title="发送（Cmd/Ctrl+Enter）"
           >
