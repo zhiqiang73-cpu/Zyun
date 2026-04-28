@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { Sparkles, FileText, Loader2, Paperclip, X, FileType2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Session } from '@/lib/types';
+import SkillDraftsChip from '@/components/skill-drafts-chip';
 
 const QUICK_PROMPTS = [
   '把这张工程图 PDF 转成 FANUC G-code（2D 铣削）',
@@ -101,6 +102,10 @@ export default function Dashboard() {
               <span className="flex-1 truncate">{s.title || '(未命名)'}</span>
             </Link>
           ))}
+        </div>
+
+        <div className="pt-3">
+          <SkillDraftsChip />
         </div>
       </aside>
 

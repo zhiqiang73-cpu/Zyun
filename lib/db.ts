@@ -77,6 +77,20 @@ function db(): DatabaseSync {
       value TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS skill_drafts (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      content TEXT NOT NULL,
+      derived_from TEXT NOT NULL DEFAULT '[]',
+      status TEXT NOT NULL DEFAULT 'pending',
+      reject_reason TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_skill_drafts_status ON skill_drafts(status);
+
     CREATE TABLE IF NOT EXISTS metadata (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
@@ -379,4 +393,111 @@ export function storeProfile(profile: Record<string, unknown>): void {
       `INSERT OR REPLACE INTO user_profile (key, value) VALUES ('main', @value)`,
     )
     .run({ value: JSON.stringify(profile) });
+}
+
+// ---- Skill Drafts -------------------------------------------------
+
+export type SkillDraftStatus = 'pending' | 'approved' | 'rejected';
+
+export type SkillDraft = {
+  id: string;
+  name: string;
+  description: string;
+  content: string;
+  /** Source session IDs that the draft was distilled from. */
+  derived_from: string[];
+  status: SkillDraftStatus;
+  reject_reason: string | null;
+  created_at: number;
+  updated_at: number;
+};
+
+function rowToSkillDraft(row: Record<string, unknown>): SkillDraft {
+  let derivedFrom: string[] = [];
+  try {
+    const parsed = JSON.parse(String(row.derived_from ?? '[]'));
+    if (Array.isArray(parsed)) derivedFrom = parsed.map(String);
+  } catch { /* ignore */ }
+  return {
+    id: row.id as string,
+    name: row.name as string,
+    description: (row.description as string) ?? '',
+    content: row.content as string,
+    derived_from: derivedFrom,
+    status: row.status as SkillDraftStatus,
+    reject_reason: (row.reject_reason as string | null) ?? null,
+    created_at: Number(row.created_at),
+    updated_at: Number(row.updated_at),
+  };
+}
+
+export function createSkillDraft(input: {
+  id: string;
+  name: string;
+  description: string;
+  content: string;
+  derived_from: string[];
+}): void {
+  const now = Date.now();
+  db()
+    .prepare(
+      `INSERT INTO skill_drafts
+        (id, name, description, content, derived_from, status, reject_reason, created_at, updated_at)
+       VALUES
+        (@id, @name, @description, @content, @derived_from, 'pending', NULL, @created_at, @updated_at)`,
+    )
+    .run({
+      id: input.id,
+      name: input.name,
+      description: input.description,
+      content: input.content,
+      derived_from: JSON.stringify(input.derived_from),
+      created_at: now,
+      updated_at: now,
+    });
+}
+
+export function getSkillDraft(id: string): SkillDraft | null {
+  const row = db()
+    .prepare(`SELECT * FROM skill_drafts WHERE id = ?`)
+    .get(id) as Record<string, unknown> | undefined;
+  return row ? rowToSkillDraft(row) : null;
+}
+
+export function listSkillDrafts(status?: SkillDraftStatus): SkillDraft[] {
+  const sql = status
+    ? `SELECT * FROM skill_drafts WHERE status = ? ORDER BY created_at DESC`
+    : `SELECT * FROM skill_drafts ORDER BY created_at DESC`;
+  const rows = (status
+    ? db().prepare(sql).all(status)
+    : db().prepare(sql).all()) as Record<string, unknown>[];
+  return rows.map(rowToSkillDraft);
+}
+
+export function updateSkillDraftStatus(
+  id: string,
+  status: SkillDraftStatus,
+  rejectReason?: string | null,
+): void {
+  db()
+    .prepare(
+      `UPDATE skill_drafts
+       SET status = @status,
+           reject_reason = @reject_reason,
+           updated_at = @updated_at
+       WHERE id = @id`,
+    )
+    .run({
+      id,
+      status,
+      reject_reason: rejectReason ?? null,
+      updated_at: Date.now(),
+    });
+}
+
+export function countSkillDraftsByStatus(status: SkillDraftStatus): number {
+  const row = db()
+    .prepare(`SELECT COUNT(*) as n FROM skill_drafts WHERE status = ?`)
+    .get(status) as { n: number };
+  return Number(row.n);
 }
