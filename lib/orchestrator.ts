@@ -292,6 +292,36 @@ function buildSystemPrompt(
 
 每个脚本都支持 \`--schema\` / \`--list-themes\` / \`--list-templates\` —— 不知道格式时先跑这个看一眼。`;
 
+  const webAppBlock = `\n## ⭐ Web App / 网站构建（自主全栈工作流）
+
+用户说"做网站 / 网页 / 落地页 / React / Next / Tailwind / 仪表盘 / 后台 / 小工具 / 部署上线"——
+**严格按 5 阶段执行，每步用工具落地，不要"建议用户自己跑"**：
+
+1. **规划** —— TodoWrite 拆 3-5 步：起骨架 / 写代码 / 起 dev server / 自查 / (上线)
+2. **初始化** —— 静态用 \`scripts/build_html.py --template hero\` 起；Next 用 \`npx create-next-app@latest .\`；先 \`ls\` 看再决定（防御）
+3. **预览** —— 写完核心代码立刻：
+   \`\`\`bash
+   python scripts/dev_serve.py
+   \`\`\`
+   后台起 dev server，自动找空闲端口。**返回 JSON 后用户的 UI 会自动出现 "Live Preview" tab**——他能在 iframe 里实时看效果。**别让他自己开 localhost。**
+4. **自主 debug** —— 启动失败/报错绝对不要扔给用户：
+   \`\`\`bash
+   python scripts/dev_logs.py --errors-only --tail 50    # 看错误
+   # 修代码（Edit）
+   python scripts/dev_serve.py --restart                 # 改了 config 才需要重启；改 .tsx 自带 HMR
+   \`\`\`
+   常见: Cannot find module → \`npm install X\`；EADDRINUSE → \`dev_kill.py\` 再起；Tailwind 没生效 → 检查 \`content\` path
+5. **构建 + 部署** —— 用户说"上线/部署/deploy"才走：
+   \`\`\`bash
+   python scripts/deploy.py --build --prod
+   \`\`\`
+   自动选 Vercel (有 VERCEL_TOKEN) / Netlify (有 NETLIFY_AUTH_TOKEN) / 兜底打 zip。把返回的 URL 报给用户。
+
+**详细的脚手架命令、debug 速查、设计规范** 在 \`skills/web-app-builder.md\`——任务一开始**先 Read 这个 skill**，照里面走。
+
+设计反 AI 美学规范看 \`skills/web-design.md\`。
+`;
+
   const parallelBlock = `\n## 并行加速准则
 
 **对独立的子任务，一次调用多个工具**（Claude SDK 支持单轮多 tool_use）：
@@ -319,7 +349,7 @@ ${modeBlock}${profileBlock}
 
 请用中文与用户交流。用户要你做网站或应用时，不要把任务拉回机械/CNC 语境；要按 Web 开发流程交付可运行产物。
 ${modeBlock}
-${profileBlock}${deliveryBlock}${parallelBlock}
+${profileBlock}${deliveryBlock}${webAppBlock}${parallelBlock}
 ${criticBlock}
 ## 通用工作流程（务必遵守）
 

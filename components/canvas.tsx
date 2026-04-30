@@ -1,10 +1,18 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { FolderOpen, FileText, Eye, Download, Boxes } from 'lucide-react';
+import { FolderOpen, FileText, Eye, Download, Boxes, Globe, ExternalLink, RefreshCw } from 'lucide-react';
 import FileTree from './file-tree';
 import { cn } from '@/lib/utils';
 import type { AgentEvent, FileEntry } from '@/lib/types';
+
+type DevPreviewState = {
+  running: boolean;
+  port?: number;
+  url?: string;
+  command?: string;
+  reason?: string;
+};
 
 type Props = {
   sessionId: string;
@@ -17,8 +25,10 @@ type Props = {
 export default function Canvas({ sessionId, events, selectedFile, onSelectFile, isRunning }: Props) {
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [content, setContent] = useState<{ text?: string; mime?: string; size?: number; isImage?: boolean } | null>(null);
-  const [tab, setTab] = useState<'files' | 'preview'>('files');
+  const [tab, setTab] = useState<'files' | 'preview' | 'live'>('files');
   const [showInternals, setShowInternals] = useState(false);
+  const [livePreview, setLivePreview] = useState<DevPreviewState>({ running: false });
+  const [liveIframeKey, setLiveIframeKey] = useState(0);
 
   // Poll workspace files
   useEffect(() => {
@@ -80,6 +90,24 @@ export default function Canvas({ sessionId, events, selectedFile, onSelectFile, 
     return () => { cancelled = true; };
   }, [sessionId, selectedFile]);
 
+  // Poll live preview status (workspace dev server)
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    async function tick() {
+      try {
+        const r = await fetch(`/api/tasks/${sessionId}/preview`);
+        if (!r.ok || cancelled) return;
+        const j = (await r.json()) as DevPreviewState;
+        setLivePreview(j);
+      } catch { /* ignore */ }
+      // Poll faster while task runs (server can come up mid-task)
+      if (!cancelled) timer = setTimeout(tick, isRunning ? 2500 : 6000);
+    }
+    void tick();
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [sessionId, isRunning]);
+
   const previewable = !!selectedFile && /\.(html|pdf|svg)$/i.test(selectedFile);
   const artifacts = inferArtifacts(events, files);
   const selectedDownloadHref = selectedFile
@@ -102,6 +130,24 @@ export default function Canvas({ sessionId, events, selectedFile, onSelectFile, 
             className={cn('btn-ghost', tab === 'preview' && 'bg-bg-hover text-text-primary')}
           >
             <Eye className="w-3.5 h-3.5" /> 预览
+          </button>
+        )}
+        {livePreview.running && (
+          <button
+            onClick={() => setTab('live')}
+            className={cn(
+              'btn-ghost',
+              tab === 'live' && 'bg-bg-hover text-text-primary',
+              'text-accent-green',
+            )}
+            title={`Live dev server on :${livePreview.port}`}
+          >
+            <Globe className="w-3.5 h-3.5" />
+            <span className="relative flex h-1.5 w-1.5 mr-1">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-green opacity-75" />
+              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-accent-green" />
+            </span>
+            Live :{livePreview.port}
           </button>
         )}
         <div className="flex-1" />
@@ -176,6 +222,40 @@ export default function Canvas({ sessionId, events, selectedFile, onSelectFile, 
             sandbox="allow-scripts allow-same-origin"
             className="w-full h-full border-0"
             title="preview"
+          />
+        </div>
+      )}
+
+      {tab === 'live' && livePreview.running && (
+        <div className="flex-1 flex flex-col">
+          <div className="px-3 py-1.5 border-b border-border-subtle flex items-center gap-2 text-xs">
+            <span className="text-accent-green font-mono">●</span>
+            <span className="text-text-muted">{livePreview.command}</span>
+            <span className="text-text-muted">→</span>
+            <span className="font-mono">{livePreview.url}</span>
+            <div className="flex-1" />
+            <button
+              onClick={() => setLiveIframeKey(k => k + 1)}
+              className="btn-ghost py-0.5 px-1.5"
+              title="刷新"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+            </button>
+            <a
+              href={livePreview.url}
+              target="_blank"
+              rel="noreferrer"
+              className="btn-ghost py-0.5 px-1.5"
+              title="在新窗口打开"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+          </div>
+          <iframe
+            key={liveIframeKey}
+            src={livePreview.url}
+            className="flex-1 w-full bg-white border-0"
+            title="live-preview"
           />
         </div>
       )}
