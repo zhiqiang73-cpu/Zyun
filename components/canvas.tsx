@@ -55,6 +55,16 @@ export default function Canvas({ sessionId, events, selectedFile, onSelectFile, 
         setContent({ isImage: true, mime: ct });
         return;
       }
+      // Non-text binary types (pdf/pptx/docx/xlsx/zip) — API returns raw bytes,
+      // not JSON. Just mark unpreviewable so UI shows a download CTA.
+      const isText =
+        ct.startsWith('application/json') ||
+        ct.startsWith('text/') ||
+        ct.startsWith('application/javascript');
+      if (!isText) {
+        setContent({ mime: ct });
+        return;
+      }
       try {
         const j = await r.json();
         if (j.error) {
@@ -147,6 +157,13 @@ export default function Canvas({ sessionId, events, selectedFile, onSelectFile, 
             {selectedFile && !content?.isImage && content?.text != null && (
               <pre className="p-4 text-xs font-mono whitespace-pre-wrap break-words">{content.text}</pre>
             )}
+            {selectedFile && !content?.isImage && content?.text == null && content?.mime && (
+              <BinaryPreview
+                sessionId={sessionId}
+                filePath={selectedFile}
+                mime={content.mime}
+              />
+            )}
           </div>
         </div>
         </div>
@@ -210,6 +227,52 @@ function ArtifactPanel({
             </a>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function BinaryPreview({
+  sessionId,
+  filePath,
+  mime,
+}: {
+  sessionId: string;
+  filePath: string;
+  mime: string;
+}) {
+  const ext = (filePath.split('.').pop() ?? '').toLowerCase();
+  const isPdf = mime === 'application/pdf' || ext === 'pdf';
+  const rawHref = `/api/tasks/${sessionId}/files?path=${encodeURIComponent(filePath)}&raw=1`;
+  const downloadHref = `${rawHref}&download=1`;
+
+  if (isPdf) {
+    return (
+      <div className="h-full bg-white">
+        <iframe src={rawHref} className="w-full h-full border-0" title="pdf-preview" />
+      </div>
+    );
+  }
+
+  const friendly =
+    {
+      pptx: 'PowerPoint 演示文稿',
+      docx: 'Word 文档',
+      xlsx: 'Excel 表格',
+      zip: 'ZIP 压缩包',
+    }[ext] ?? `${ext.toUpperCase()} 文件`;
+
+  return (
+    <div className="h-full flex flex-col items-center justify-center gap-3 p-8 text-text-muted text-sm">
+      <FileText className="w-12 h-12" />
+      <div className="text-text-secondary">{friendly} · 浏览器内不便预览</div>
+      <div className="flex gap-2">
+        <a href={downloadHref} className="btn-primary">
+          <Download className="w-4 h-4" /> 下载文件
+        </a>
+        <a href={rawHref} target="_blank" rel="noreferrer" className="btn-ghost">
+          <Eye className="w-4 h-4" /> 在新窗口打开
+        </a>
       </div>
     </div>
   );

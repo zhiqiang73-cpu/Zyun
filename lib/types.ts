@@ -30,6 +30,8 @@ export type EventType =
   | 'sandboxUpdate'
   | 'queueStatusChange'
   | 'taskModeChanged'
+  | 'criticReport'
+  | 'helperProgress'
   // reserved for v0.2+
   | 'explanation'
   | 'fileOperationPromotion'

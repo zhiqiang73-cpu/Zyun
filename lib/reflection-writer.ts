@@ -157,7 +157,11 @@ export async function runReflection(
 
   let reflection: string | null = null;
   try {
-    reflection = await helper('verify', prompt, { maxTokens: 800, temperature: 0.3 });
+    reflection = await helper('verify', prompt, {
+      maxTokens: 800,
+      temperature: 0.3,
+      progress: { sessionId: sid, label: '生成任务反思' },
+    });
   } catch (err) {
     console.warn('[reflection-writer] helper failed:', err);
     return;

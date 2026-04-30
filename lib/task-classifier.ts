@@ -6,10 +6,10 @@
  *
  *   lite     —— Claude Haiku 4.5 + 精简 system prompt（不强制 process-planning skill）
  *                适用：简单问答 / 单一计算 / 短代码
- *   standard —— Claude Sonnet 4.5 + 完整工艺手册流程
- *                适用：图纸→G-code、文档处理、多步任务
+ *   standard —— Claude Sonnet 4.5 + 完整领域 workflow
+ *                适用：图纸→G-code、网站/网页/工具生成、文档处理、多步任务
  *   heavy    —— Claude Sonnet 4.5 + 多 helper 并行 + 强制 critic 审查
- *                适用：多图纸/PLC+CNC/复杂工艺/高精度件
+ *                适用：多图纸/PLC+CNC/复杂工艺/高精度件、多页面复杂 Web app
  *
  * 速度收益：lite 模式响应 < 5s；standard 30-60s；heavy 1-3min（带 critic）
  */
@@ -101,8 +101,15 @@ function heuristicClassify(
   ];
   const isQaPattern = qaPatterns.some(re => re.test(classifyPrompt));
 
+  const webBuildPatterns = [
+    /(?:做|建|搭|写|生成|创建|设计|开发).{0,12}(?:网站|网页|官网|落地页|landing\s?page|portfolio|作品集|博客|商城|仪表盘|dashboard|后台|管理系统|小工具|小游戏|web\s?app|app)/i,
+    /(?:html|css|javascript|typescript|react|next\.?js|tailwind|前端|页面|组件).{0,18}(?:做|建|写|生成|创建|设计|开发|实现)/i,
+    /(?:做|建|写|生成|创建|设计|开发|实现).{0,18}(?:html|css|javascript|typescript|react|next\.?js|tailwind|前端|页面|组件)/i,
+  ];
+  const isWebBuild = webBuildPatterns.some(re => re.test(classifyPrompt));
+
   // 动作词（明确要求"做事"，不只是"问"）
-  const actionVerbs = /(?:生成|创建|写一?(?:段|个|份)|做一?个|制定|画|设计|输出.*代码|出.*?代码|批量|加工出|处理.*文件|提取.*?(?:特征|尺寸|信息).*?(?:并|然后))/;
+  const actionVerbs = /(?:生成|创建|写一?(?:段|个|份)|做一?个|制定|画|设计|开发|实现|搭建|输出.*代码|出.*?代码|批量|加工出|处理.*文件|提取.*?(?:特征|尺寸|信息).*?(?:并|然后))/;
   const isAction = actionVerbs.test(classifyPrompt);
 
   // ---- LITE ----（最优先）
@@ -131,12 +138,15 @@ function heuristicClassify(
     'plc', 'cnc', '联动', '多轴', '多页',
     '高精度', 'h6', 'h7/g6', '装配',
     '复杂工艺', '批量生产', '量产', '大批量',
+    '后台', '管理系统', 'dashboard', '仪表盘', '登录', '权限',
+    '多页面', '路由', '数据库', '支付', 'saas', '图表', '拖拽',
   ];
   const heavyHits = heavyKeywords.filter(k => p.includes(k)).length;
   const manyAttachments = attachmentNames.length >= 3;
   const multiCodeOutput = /(?:plc|s7|梯形图).*(?:g.?code|nc|fanuc)|(?:g.?code|nc|fanuc).*(?:plc|s7|梯形图)/i.test(classifyPrompt);
+  const complexWebOutput = isWebBuild && heavyHits >= 2;
 
-  if (heavyHits >= 2 || manyAttachments || multiCodeOutput) {
+  if (heavyHits >= 2 || manyAttachments || multiCodeOutput || complexWebOutput) {
     return {
       mode: 'heavy',
       reason: `复杂任务：${heavyHits} 复杂词 / ${attachmentNames.length} 附件 / 多代码联动=${multiCodeOutput}`,
@@ -146,10 +156,10 @@ function heuristicClassify(
   }
 
   // ---- STANDARD ----
-  if (hasFiles || isAction) {
+  if (hasFiles || isAction || isWebBuild) {
     return {
       mode: 'standard',
-      reason: hasFiles ? '有附件文件' : '含动作词（要生成/创建）',
+      reason: hasFiles ? '有附件文件' : isWebBuild ? '网站/前端产物生成任务' : '含动作词（要生成/创建）',
       recommendedModel: MODEL_BY_MODE.standard,
       forceCritic: false,
     };
@@ -179,8 +189,8 @@ ${classifyPrompt.slice(0, 800)}
 
 判定标准：
 - lite：纯解释/对比/概念问答（即使提到 CNC/G-code/PLC）、简单计算、短代码问答；通常无附件且不要求生成产物
-- standard：需要生成具体产物（文件/代码/方案）或处理附件（如 PDF 图纸）、多步但流程清晰
-- heavy：复杂工艺（PLC + CNC 联动）/ 多页图纸 / 高精度（H6 H7 严格）/ 多代码语言混合
+- standard：需要生成具体产物（文件/代码/方案）或处理附件（如 PDF 图纸、网站/网页/前端页面）、多步但流程清晰
+- heavy：复杂工艺（PLC + CNC 联动）/ 多页图纸 / 高精度（H6 H7 严格）/ 多代码语言混合 / 多页面复杂 Web app
 
 只输出 JSON（不要其他文字）：
 {"mode": "lite|standard|heavy", "reason": "20 字以内"}`;
@@ -210,7 +220,7 @@ ${classifyPrompt.slice(0, 800)}
   }
 
   if (LITE_BIAS_ENABLED) {
-    const likelyAction = /(?:生成|创建|写一?(?:段|个|份)|做一?个|制定|画|设计|输出.*代码|出.*?代码|批量|加工出|处理.*文件)/.test(classifyPrompt);
+    const likelyAction = /(?:生成|创建|写一?(?:段|个|份)|做一?个|制定|画|设计|开发|实现|搭建|输出.*代码|出.*?代码|批量|加工出|处理.*文件|网站|网页|前端|html|react|next\.?js|tailwind)/i.test(classifyPrompt);
     if (attachmentNames.length === 0 && !likelyAction) {
       return {
         mode: 'lite',

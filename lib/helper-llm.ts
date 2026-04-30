@@ -13,6 +13,34 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { nanoid } from 'nanoid';
+import { appendEvent } from './db';
+import type { AgentEvent } from './types';
+
+// ---- helperProgress emitter -------------------------------------------------
+// Optional progress events so UI can show "正在让 verify 模型审核..." instead of
+// going dark when a helper call takes 5-30s.
+function emitProgress(
+  sessionId: string,
+  state: 'started' | 'finished' | 'error',
+  meta: Record<string, unknown>,
+): void {
+  const ev: AgentEvent = {
+    id: nanoid(22),
+    sessionId,
+    type: 'helperProgress',
+    timestamp: Date.now(),
+    payload: { state, ...meta },
+  };
+  try { appendEvent(ev); } catch { /* don't let progress reporting break the call */ }
+}
+
+export type HelperProgress = {
+  /** Session to attach the helperProgress events to. Required to enable. */
+  sessionId: string;
+  /** Short human-readable label, e.g. "审计产物" / "蒸馏 skill draft" / "看图". */
+  label: string;
+};
 
 // ---- Vision skill 自动注入 ------------------------------------------
 // 让 vision helper 调用时自动以 skills/drawing-recognition.md 为 system prompt，
@@ -275,14 +303,35 @@ function resolveKey(cfg: HelperConfig): string | undefined {
 export async function helper(
   role: HelperRole,
   prompt: string,
-  options?: { maxTokens?: number; temperature?: number; system?: string },
+  options?: {
+    maxTokens?: number;
+    temperature?: number;
+    system?: string;
+    progress?: HelperProgress;
+  },
 ): Promise<string | null> {
   const config = loadConfig();
   const cfg = config[role] ?? config.default;
-  if (!cfg) return null;
+  if (!cfg) {
+    if (options?.progress) {
+      emitProgress(options.progress.sessionId, 'error', {
+        role,
+        label: options.progress.label,
+        reason: 'role-not-configured',
+      });
+    }
+    return null;
+  }
   const key = resolveKey(cfg);
   if (!key) {
     console.warn(`[helper-llm] role=${role}: key_env=${cfg.key_env} not set, skipping`);
+    if (options?.progress) {
+      emitProgress(options.progress.sessionId, 'error', {
+        role,
+        label: options.progress.label,
+        reason: `key_env=${cfg.key_env}-not-set`,
+      });
+    }
     return null;
   }
 
@@ -298,6 +347,15 @@ export async function helper(
     stream: false,
   };
 
+  const startedAt = Date.now();
+  if (options?.progress) {
+    emitProgress(options.progress.sessionId, 'started', {
+      role,
+      label: options.progress.label,
+      model: cfg.model,
+    });
+  }
+
   try {
     const r = await fetch(`${cfg.base.replace(/\/+$/, '')}/chat/completions`, {
       method: 'POST',
@@ -310,13 +368,39 @@ export async function helper(
     if (!r.ok) {
       const errText = await r.text().catch(() => '');
       console.error(`[helper-llm] role=${role} HTTP ${r.status}: ${errText.slice(0, 200)}`);
+      if (options?.progress) {
+        emitProgress(options.progress.sessionId, 'error', {
+          role,
+          label: options.progress.label,
+          status: r.status,
+          durationMs: Date.now() - startedAt,
+        });
+      }
       return null;
     }
     const j: any = await r.json();
     const text = j?.choices?.[0]?.message?.content;
-    return typeof text === 'string' ? text : null;
+    const out = typeof text === 'string' ? text : null;
+    if (options?.progress) {
+      emitProgress(options.progress.sessionId, 'finished', {
+        role,
+        label: options.progress.label,
+        ok: !!out,
+        durationMs: Date.now() - startedAt,
+        chars: out?.length ?? 0,
+      });
+    }
+    return out;
   } catch (err) {
     console.error(`[helper-llm] role=${role} call failed:`, err);
+    if (options?.progress) {
+      emitProgress(options.progress.sessionId, 'error', {
+        role,
+        label: options.progress.label,
+        reason: String(err),
+        durationMs: Date.now() - startedAt,
+      });
+    }
     return null;
   }
 }

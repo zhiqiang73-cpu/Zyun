@@ -101,6 +101,8 @@ export default function ChatStream({ sessionId, session, onEvents }: Props) {
   const renderable = collapseEvents(events);
   const latestPlan = findLatestPlan(events);
   const isRunning = session?.status === 'running' || session?.status === 'queued';
+  // Live helper progress (last 'started' without a matching 'finished'/'error')
+  const liveHelper = findLiveHelperProgress(events);
 
   return (
     <section className="border-r border-border-subtle flex flex-col min-h-screen">
@@ -137,7 +139,8 @@ export default function ChatStream({ sessionId, session, onEvents }: Props) {
           }
           return null;
         })}
-        {isRunning && <ThinkingIndicator />}
+        {liveHelper && <HelperProgressIndicator label={liveHelper.label} role={liveHelper.role} />}
+        {isRunning && !liveHelper && <ThinkingIndicator />}
         <div ref={bottomRef} />
       </div>
 
@@ -200,6 +203,15 @@ function ThinkingIndicator() {
   );
 }
 
+function HelperProgressIndicator({ label, role }: { label: string; role: string }) {
+  return (
+    <div className="flex items-center gap-2 text-xs text-accent-blue px-10 py-1">
+      <Loader2 className="w-3 h-3 animate-spin" />
+      <span>正在调用 <span className="font-medium">{role}</span> 模型 — {label}</span>
+    </div>
+  );
+}
+
 // ---- Helpers ------------------------------------------------------
 
 type RenderItem =
@@ -252,6 +264,30 @@ function collapseEvents(events: AgentEvent[]): RenderItem[] {
 function findLatestPlan(events: AgentEvent[]): AgentEvent | null {
   for (let i = events.length - 1; i >= 0; i--) {
     if (events[i].type === 'planUpdate') return events[i];
+  }
+  return null;
+}
+
+/**
+ * Find the latest helperProgress 'started' event that hasn't been answered by
+ * a 'finished' or 'error' event yet. Used to show a live "calling X model — Y"
+ * indicator so the user doesn't think the app is dead during 5-30s helper calls.
+ */
+function findLiveHelperProgress(
+  events: AgentEvent[],
+): { label: string; role: string } | null {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i];
+    if (e.type !== 'helperProgress') continue;
+    const p = e.payload as Record<string, unknown> | undefined;
+    if (!p) continue;
+    if (p.state === 'finished' || p.state === 'error') return null;
+    if (p.state === 'started') {
+      return {
+        label: String(p.label ?? ''),
+        role: String(p.role ?? ''),
+      };
+    }
   }
   return null;
 }

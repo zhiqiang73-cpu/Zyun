@@ -18,6 +18,7 @@ import { classifyTask, type TaskMode } from './task-classifier';
 import { helper } from './helper-llm';
 import { readProfile, renderProfileBlock } from './user-profile';
 import { runReflection } from './reflection-writer';
+import { runCriticPass } from './critic-pass';
 import type { AgentEvent, EventType, ToolName, PlanTask } from './types';
 
 const WORKSPACES_DIR =
@@ -64,6 +65,29 @@ function configureClaudeCodeSdkEnv(): { baseUrl?: string; keySource?: string } {
   return out;
 }
 
+/** 模块级缓存：skill frontmatter（首次构建后所有 task 复用） */
+let _skillIndexCache: { name: string; description: string; file: string }[] | null = null;
+function readSkillIndex(): { name: string; description: string; file: string }[] {
+  if (_skillIndexCache) return _skillIndexCache;
+  const out: { name: string; description: string; file: string }[] = [];
+  if (!existsSync(SKILLS_SRC)) return (_skillIndexCache = out);
+  for (const f of readdirSync(SKILLS_SRC).filter(n => n.endsWith('.md'))) {
+    try {
+      const raw = readFileSync(path.join(SKILLS_SRC, f), 'utf-8');
+      const fm = raw.match(/^---\n([\s\S]*?)\n---/);
+      if (!fm) {
+        out.push({ name: f.replace(/\.md$/, ''), description: '(no frontmatter)', file: f });
+        continue;
+      }
+      const name = fm[1].match(/^name:\s*(.+)$/m)?.[1].trim() ?? f.replace(/\.md$/, '');
+      const description = fm[1].match(/^description:\s*(.+)$/m)?.[1].trim() ?? '';
+      out.push({ name, description: description.slice(0, 220), file: f });
+    } catch { /* ignore */ }
+  }
+  _skillIndexCache = out;
+  return out;
+}
+
 /** 把 skills/ scripts/ knowledge/ 拷到任务工作区，让 agent 可以 Read/Bash 调用。 */
 function provisionWorkspace(workspaceDir: string): { skillsList: string; scriptsList: string } {
   const copyDir = (src: string, dst: string, exts: string[]): string[] => {
@@ -95,8 +119,16 @@ function provisionWorkspace(workspaceDir: string): { skillsList: string; scripts
     copyFileSync(helpersSrc, path.join(helpersDstDir, 'helpers.json'));
   }
 
+  // skillsList 现在带 frontmatter 描述：agent 不用 Read 每个 .md 也知道每个干嘛
+  const idx = readSkillIndex();
+  const skillsList = skillFiles.map(f => {
+    const meta = idx.find(s => s.file === f);
+    if (meta?.description) return `  - skills/${f}: ${meta.description}`;
+    return `  - skills/${f}`;
+  }).join('\n');
+
   return {
-    skillsList: skillFiles.map(f => `  - skills/${f}`).join('\n'),
+    skillsList,
     scriptsList: scriptFiles.map(f => `  - scripts/${f}`).join('\n'),
   };
 }
@@ -216,41 +248,49 @@ function buildSystemPrompt(
 
 复杂任务，**必须走全流程**：
 1. TodoWrite 拆 5+ 步骤
-2. **先 Read 全部相关 skills**（drawing-recognition / process-planning / machining-handbook / gcode-fanuc）
-3. **强制 critic 审查**（任务结束前必须调 \`python scripts/critic.py\` 审查产出，verdict 为 fail 时必须修复重审）
-4. 多 helper 并行调用（vision_call.py / calc_feeds_speeds.py 多次同时跑）`;
+2. **先按领域 Read 相关 skills**：
+   - 网站/Web App：\`skills/web-app-builder.md\`
+   - 机械/G-code：\`skills/drawing-recognition.md\` / \`skills/process-planning.md\` / \`skills/machining-handbook.md\` / \`skills/gcode-fanuc.md\`
+3. 机械/G-code heavy 任务要做 critic 审查；Web heavy 任务至少做 typecheck/build 或静态预览验证
+4. 多 helper / 多工具并行执行独立子任务`;
     }
     // standard
     return `\n## 当前任务等级：STANDARD（标准）
 
-按完整 2D 铣削流程走，但保持平衡：
+按任务领域选择合适流程并保持平衡：
 - TodoWrite 拆 3-5 步
-- Read 必要 skills（process-planning + 相关）
+- Read 必要 skills（网站任务读 web-app-builder；机加工任务读 process-planning + 相关）
 - 复杂工艺路线建议主动调 critic 自检
 - 利用并行（独立 tool call 一次发出多个）`;
   })();
 
-  const criticBlock = forceCritic
-    ? `\n## ⭐ Critic 强制审查（heavy 任务必做）
+  const criticBlock = `\n## ⭐ 审计自动跑（你不用手动调 critic）
 
-任务完成 G-code 后，**调用独立 critic 子 agent 审查**：
-\`\`\`bash
-python scripts/critic.py \\
-  --requirements "用户原始需求文本" \\
-  --plan process_plan.json \\
-  --gcode part.nc \\
-  [--features features.json] \\
-  [--lint lint_output.txt] \\
-  --out review.json
-\`\`\`
+任务结束时，系统会**自动**用独立 verify 模型按 critic-checklist 审查产物：
+- 检查"用户要的东西做了吗 / 产物本身有没有瑕疵 / 你说的和产物对得上吗"
+- 审计结果会以 ⚠️ 标红消息显示给用户（你看不到，所以**别复述别假装在跑 critic**）
 
-Read review.json，按 \`verdict\`：
-- **pass** → 直接交付
-- **warn** → 总结 warnings，给用户看，他决定是否要改
-- **fail** → 按 critical_issues 修复，再 critic 一次
+你要做的：**专心做对、做完整**。不要"草草交差然后嘴上说 perfect"——critic 会抓。
 
-Critic 用 DeepSeek-R1 独立推理，不是你的复述。\n`
-    : '';
+发现你之前漏的：
+- 用户要的产物（.pptx / .docx / .pdf / .nc）实际生成了吗？还是只写了 markdown 草稿？
+- 数字是不是真算过的？还是脑补的？
+- 标题/章节有没有 "TODO" / "{placeholder}" 没替换？\n`;
+
+  const deliveryBlock = `\n## ⭐ 产物生成（不要只写 markdown 然后说"做好了"）
+
+用户说"做 PPT / Word / PDF / 网页"时，**必须生成对应的二进制/可下载文件**（不只是 markdown 文本）：
+
+| 用户要 | 用什么 | 命令模板 |
+|---|---|---|
+| PPT / 演示文稿 / deck | scripts/build_pptx.py | \`python scripts/build_pptx.py --schema\` 看格式 → 写 deck.json → \`python scripts/build_pptx.py --spec deck.json --out deck.pptx\` |
+| Word / 报告 / .docx | scripts/build_docx.py | 写 markdown → \`python scripts/build_docx.py --md report.md --out report.docx --title "..."\` |
+| PDF / 打印稿 | scripts/md2pdf.py | 写 markdown → \`python scripts/md2pdf.py --md report.md --out report.pdf --title "..." --theme light\` |
+| 网页 / landing / 落地页 | scripts/build_html.py | \`python scripts/build_html.py --schema\` 看 spec → 改 → \`python scripts/build_html.py --spec page.json --out index.html\` |
+
+设计规范看 skill 索引里的 **slide-design / doc-design / web-design**。脚本帮你做了字体/字号/留白/主题——你只需要写好 spec，不要试图自己用 raw HTML/XML 拼 .pptx。
+
+每个脚本都支持 \`--schema\` / \`--list-themes\` / \`--list-templates\` —— 不知道格式时先跑这个看一眼。`;
 
   const parallelBlock = `\n## 并行加速准则
 
@@ -262,7 +302,7 @@ Critic 用 DeepSeek-R1 独立推理，不是你的复述。\n`
 
   // LITE 模式：只发简短的"知识问答助手"prompt，不包含工艺流程/工具/skills 列表
   if (taskMode === 'lite') {
-    return `你是 Manuscopy，一个机械/制造业领域的 AI 助手。当前是**轻量问答模式**。
+    return `你是 Manuscopy，一个工程与创造型 AI 助手，擅长机械制造、自动化、网站与应用开发。当前是**轻量问答模式**。
 ${modeBlock}${profileBlock}
 
 ## 安全
@@ -273,9 +313,13 @@ ${modeBlock}${profileBlock}
   }
 
   // STANDARD / HEAVY 模式：完整流程
-  return `你是 Manuscopy，一个专业的 AI 助手，**当前主要服务于机械/制造业自动化场景**（CAD 图纸 → CNC G-code / PLC 代码）。请用中文与用户交流。
+  return `你是 Manuscopy，一个专业的工程型 AI 助手，服务两类核心场景：
+- 机械/制造业自动化：CAD/PDF 图纸 → CNC G-code / PLC 代码 / 工艺分析
+- 网站与应用开发：网站、网页、后台、仪表盘、工具、小游戏、React/Next/Tailwind 前端
+
+请用中文与用户交流。用户要你做网站或应用时，不要把任务拉回机械/CNC 语境；要按 Web 开发流程交付可运行产物。
 ${modeBlock}
-${profileBlock}${parallelBlock}
+${profileBlock}${deliveryBlock}${parallelBlock}
 ${criticBlock}
 ## 通用工作流程（务必遵守）
 
@@ -293,6 +337,22 @@ ${criticBlock}
    - 输出 **draft 到 workspace/skills/、workspace/knowledge/、workspace/scripts/**
 4. 给用户清单告知如何 promote 到项目级（cp 命令）
 5. **不要**直接写到项目 skills/（沙箱安全边界）
+
+## 网站 / Web App 构建工作流
+
+如果用户说"做网站 / 网页 / 官网 / 落地页 / 后台 / 仪表盘 / 小工具 / 小游戏 / React / Next / Tailwind / HTML"等，**走 Web 构建流程**：
+
+0. **先 Read \`skills/web-app-builder.md\`**。
+1. 判断产物形态：
+   - 简单网站/原型/单页工具：在当前工作区创建 \`index.html\`，默认 Tailwind CDN + 原生 JS。
+   - 已有 React/Next 项目：遵循项目结构修改 \`app/\`、\`components/\`、\`lib/\`。
+2. TodoWrite 拆 3-5 步：需求框架、页面结构、实现、验证、交付。
+3. 实现真实可用的界面：导航、主区域、状态、按钮/表单/筛选/切换等交互要能运行。
+4. 做响应式：桌面和手机都不能文字溢出或布局重叠。
+5. 验证：
+   - 静态 HTML 至少确认文件存在，必要时用 \`python -m http.server 8000\` 预览。
+   - Next/React 项目优先跑 \`npm run typecheck\` / \`npm run build\`。
+6. 最终告诉用户产物文件和打开方式。不要只给代码片段。
 
 ## 2D 铣削快速工作流（TL;DR，详细版见 skills/2d-milling-workflow.md）
 
@@ -658,6 +718,64 @@ export async function runAgent(
     if (isStopRequested(workspaceDir)) {
       emitStopped(sessionId);
       return;
+    }
+
+    // ⭐ 强制审计 pass（heavy / forceCritic 必跑；standard 有产物时跑；lite 跳）
+    try {
+      emit(sessionId, {
+        type: 'liveStatus',
+        payload: { state: 'auditing', message: 'critic 正在独立审计产物...' },
+      });
+      const report = await runCriticPass({
+        sessionId,
+        userPrompt: prompt,
+        taskMode,
+        forceCritic,
+        workspaceDir,
+      });
+      emit(sessionId, {
+        type: 'criticReport',
+        payload: {
+          verdict: report.verdict,
+          summary: report.summary,
+          issues: report.issues,
+          inspected: report.inspected,
+          ranBy: report.ranBy,
+          skippedReason: report.skippedReason,
+        },
+      });
+      // 把审计结果浓缩成一条 assistant chat，让用户看到（仅当跑了且有内容）
+      if (report.verdict !== 'skipped') {
+        const verdictLabel: Record<string, string> = {
+          pass: '✅ 审计通过',
+          warn: '⚠️ 审计发现 minor/major 问题',
+          fail: '❌ 审计未通过（critical issues）',
+        };
+        const lines = [
+          `**${verdictLabel[report.verdict] ?? '审计完成'}** — ${report.summary}`,
+        ];
+        if (report.issues.length) {
+          lines.push('');
+          for (const it of report.issues.slice(0, 8)) {
+            const sevTag =
+              it.severity === 'critical' ? '🔴' :
+              it.severity === 'major' ? '🟠' : '🟡';
+            lines.push(`${sevTag} **[${it.severity}/${it.area}]** ${it.detail}`);
+            if (it.fix) lines.push(`   ↳ 建议：${it.fix}`);
+          }
+        }
+        emit(sessionId, {
+          type: 'chat',
+          sender: 'assistant',
+          content: lines.join('\n'),
+        });
+      }
+    } catch (auditErr) {
+      console.warn('[manuscopy] critic pass error:', auditErr);
+      emit(sessionId, {
+        type: 'liveStatus',
+        payload: { state: 'audit_failed', error: String(auditErr) },
+      });
     }
 
     emit(sessionId, {

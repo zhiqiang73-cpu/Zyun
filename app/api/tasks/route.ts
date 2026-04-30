@@ -5,7 +5,6 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { nanoid } from 'nanoid';
 import { createSession, listSessions } from '@/lib/db';
-import { runAgent, deriveTitle } from '@/lib/orchestrator';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -60,6 +59,12 @@ async function preprocessPdf(workspaceDir: string, pdfFilename: string): Promise
 function safeFilename(name: string): string {
   const base = name.split(/[\\/]/).pop() ?? 'file';
   return base.replace(/[^a-zA-Z0-9._\-一-龥]/g, '_').slice(0, 200);
+}
+
+function deriveTitle(prompt: string): string {
+  const cleaned = prompt.trim().replace(/\s+/g, ' ');
+  const firstLine = cleaned.split(/[.!?。！？\n]/)[0] ?? cleaned;
+  return firstLine.length > 60 ? firstLine.slice(0, 60) + '…' : firstLine;
 }
 
 export async function GET() {
@@ -141,8 +146,12 @@ export async function POST(req: Request) {
   });
 
   // 文件已经在 workspace/<id>/uploads/，runAgent 启动时 system prompt 会列出来
-  void runAgent(id, prompt, { context: 'initial' }).catch((err) => {
-    console.error('[manuscopy] agent run failed', id, err);
+  setImmediate(() => {
+    void import('@/lib/orchestrator')
+      .then(({ runAgent }) => runAgent(id, prompt, { context: 'initial' }))
+      .catch((err) => {
+        console.error('[manuscopy] agent run failed', id, err);
+      });
   });
 
   return NextResponse.json({ id, uploadedFiles: savedNames });

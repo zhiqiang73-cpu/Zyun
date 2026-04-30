@@ -9,9 +9,10 @@ import type { Session } from '@/lib/types';
 import SkillDraftsChip from '@/components/skill-drafts-chip';
 
 const QUICK_PROMPTS = [
+  '做一个机械加工厂官网首页，风格专业，能展示服务和案例',
+  '做一个报价计算器网页，包含材料、工时、数量和总价',
+  '做一个生产看板 dashboard，显示订单、设备状态和异常提醒',
   '把这张工程图 PDF 转成 FANUC G-code（2D 铣削）',
-  '读 PDF 图纸提取所有孔的位置和直径，列成表格',
-  '基于上传的工艺规范文档，写一段 PLC 西门子 S7 ladder 逻辑',
 ];
 
 export default function Dashboard() {
@@ -120,7 +121,7 @@ export default function Dashboard() {
         <div className="w-full max-w-3xl">
           <h1 className="text-3xl font-semibold text-center mb-2">我能为你做什么？</h1>
           <p className="text-text-muted text-center mb-8">
-            CAD/PDF → CNC G-code · PLC 代码 · 工程问答
+            网站 / Web App · CAD/PDF → CNC G-code · PLC 代码 · 工程问答
           </p>
 
           <div className="card p-3">
@@ -157,7 +158,7 @@ export default function Dashboard() {
                 ref={fileInputRef}
                 type="file"
                 multiple
-                accept=".pdf,.png,.jpg,.jpeg,.dxf,.txt,.md"
+                accept=".pdf,.png,.jpg,.jpeg,.dxf,.txt,.md,.html,.css,.js,.ts,.tsx,.json"
                 className="hidden"
                 onChange={e => {
                   addFiles(e.target.files);
